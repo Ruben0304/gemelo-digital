@@ -86,7 +86,6 @@ export const PREDICTIONS_QUERY = `
         consumptionKwh
         batteryLevel
         confidence
-        hasBlackout
         weatherCondition
       }
       alerts {
@@ -258,25 +257,6 @@ export const APPLIANCE_QUERY = `
   }
 `
 
-export const BLACKOUTS_QUERY = `
-  query Blackouts($startDate: String, $endDate: String) {
-    blackouts(startDate: $startDate, endDate: $endDate) {
-      _id
-      date
-      intervals {
-        start
-        end
-        durationMinutes
-      }
-      province
-      municipality
-      notes
-      createdAt
-      updatedAt
-    }
-  }
-`
-
 // ============================================================================
 // Mutations
 // ============================================================================
@@ -427,39 +407,93 @@ export const DELETE_APPLIANCE_MUTATION = `
   }
 `
 
-export const CREATE_BLACKOUT_MUTATION = `
-  mutation CreateBlackout($input: BlackoutInput!) {
-    createBlackout(input: $input) {
-      _id
-      date
-      intervals {
-        start
-        end
-        durationMinutes
-      }
-      createdAt
+// ── Mediciones por lote (Hioki) ──────────────────────────────────────────────
+
+export const APPLIANCE_BATCHES_QUERY = `
+  query ApplianceBatches($applianceId: String!) {
+    applianceBatches(applianceId: $applianceId) {
+      batchId
+      applianceId
+      applianceName
+      filename
+      uploadedAt
+      startDate
+      endDate
+      samples
+      kwhDayEstimatedThis
+      kwhDayEstimatedOthers
     }
   }
 `
 
-export const UPDATE_BLACKOUT_MUTATION = `
-  mutation UpdateBlackout($id: String!, $input: BlackoutInput!) {
-    updateBlackout(id: $id, input: $input) {
-      _id
+export const DAILY_REPORT_QUERY = `
+  query DailyReport($date: String!) {
+    dailyReport(date: $date) {
       date
-      intervals {
-        start
-        end
-        durationMinutes
+      productionKwh
+      measuredConsumptionKwh
+      estimatedConsumptionKwh
+      totalConsumptionKwh
+      hasRealData
+      appliances {
+        applianceId
+        name
+        mode
+        kwhDay
+        kwhDayEstimated
+        errorPercent
+        readingCount
       }
-      updatedAt
     }
   }
 `
 
-export const DELETE_BLACKOUT_MUTATION = `
-  mutation DeleteBlackout($id: String!) {
-    deleteBlackout(id: $id)
+export const APPLIANCE_READINGS_QUERY = `
+  query ApplianceReadings($applianceId: String!, $startDate: String!, $endDate: String!) {
+    applianceReadings(applianceId: $applianceId, startDate: $startDate, endDate: $endDate) {
+      timestamp
+      powerKw
+    }
+  }
+`
+
+export const PREVIEW_APPLIANCE_BATCH_MUTATION = `
+  mutation PreviewApplianceBatch($fileContent: String!) {
+    previewApplianceBatch(fileContent: $fileContent) {
+      samples
+      startDate
+      endDate
+    }
+  }
+`
+
+export const UPLOAD_APPLIANCE_BATCH_MUTATION = `
+  mutation UploadApplianceBatch(
+    $id: String!
+    $fileContent: String!
+    $startDate: String
+    $endDate: String
+  ) {
+    uploadApplianceBatch(
+      id: $id
+      fileContent: $fileContent
+      startDate: $startDate
+      endDate: $endDate
+    ) {
+      batchId
+      applianceName
+      startDate
+      endDate
+      samples
+      kwhDayEstimatedThis
+      kwhDayEstimatedOthers
+    }
+  }
+`
+
+export const DELETE_APPLIANCE_BATCH_MUTATION = `
+  mutation DeleteApplianceBatch($batchId: String!) {
+    deleteApplianceBatch(batchId: $batchId)
   }
 `
 

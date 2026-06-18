@@ -66,15 +66,10 @@ function slugDate(): string {
 // ─── CSV Exports ──────────────────────────────────────────────────────────────
 
 export function exportReadingsCsv(readings: HistoricalReading[], systemName = 'Gemelo Digital') {
-  const headers = ['Timestamp', 'Producción (kW)', 'Consumo (kW)', 'Batería (%)', 'Export Red (kW)', 'Import Red (kW)', 'Eficiencia (%)'];
+  const headers = ['Timestamp', 'Producción (kW)'];
   const rows = readings.map(r => [
     fmtTs(r.timestamp),
-    r.production.toFixed(2),
-    r.consumption.toFixed(2),
-    r.batteryLevel.toFixed(1),
-    r.gridExport.toFixed(3),
-    r.gridImport.toFixed(3),
-    r.efficiency.toFixed(1),
+    r.productionKw.toFixed(2),
   ]);
   const csv = buildCsv(headers, rows);
   downloadFile(csv, `${systemName.replace(/\s/g, '_')}_lecturas_${slugDate()}.csv`, 'text/csv;charset=utf-8;');
@@ -82,19 +77,14 @@ export function exportReadingsCsv(readings: HistoricalReading[], systemName = 'G
 
 export function exportSummariesCsv(summaries: DailySummary[], systemName = 'Gemelo Digital') {
   const headers = [
-    'Fecha', 'Producción Total (kWh)', 'Consumo Total (kWh)',
-    'CO₂ Evitado (kg)', 'Batería Promedio (%)', 'Producción Máx (kW)',
-    'Consumo Máx (kW)', 'Eficiencia Promedio (%)', 'Lecturas',
+    'Fecha', 'Producción Total (kWh)', 'CO₂ Evitado (kg)',
+    'Producción Máx (kW)', 'Lecturas',
   ];
   const rows = summaries.map(s => [
     s.date,
-    s.totalProduction.toFixed(2),
-    s.totalConsumption.toFixed(2),
-    (s.totalProduction * 0.5).toFixed(2),
-    s.avgBatteryLevel.toFixed(1),
-    s.maxProduction.toFixed(2),
-    s.maxConsumption.toFixed(2),
-    s.avgEfficiency.toFixed(1),
+    s.totalProductionKwh.toFixed(2),
+    (s.totalProductionKwh * 0.5).toFixed(2),
+    s.maxProductionKw.toFixed(2),
     s.readingCount,
   ]);
   const csv = buildCsv(headers, rows);
@@ -237,35 +227,28 @@ export async function exportSummariesPdf(
   drawPageHeader(doc, meta);
 
   // KPIs
-  const totalProd = summaries.reduce((s, d) => s + d.totalProduction, 0);
-  const totalCons = summaries.reduce((s, d) => s + d.totalConsumption, 0);
-  const avgBat = summaries.length ? summaries.reduce((s, d) => s + d.avgBatteryLevel, 0) / summaries.length : 0;
+  const totalProd = summaries.reduce((s, d) => s + d.totalProductionKwh, 0);
+  const maxProdKw = summaries.length ? Math.max(...summaries.map(d => d.maxProductionKw)) : 0;
   const co2 = totalProd * 0.5;
-  const selfSufficiency = totalCons > 0 ? Math.min(100, (totalProd / totalCons) * 100) : 0;
-  const avgEff = summaries.length ? summaries.reduce((s, d) => s + d.avgEfficiency, 0) / summaries.length : 0;
 
   const kpis: ReportKPI[] = [
     { label: 'Producción Total', value: `${totalProd.toFixed(1)} kWh` },
-    { label: 'Consumo Total', value: `${totalCons.toFixed(1)} kWh` },
     { label: 'CO₂ Evitado', value: `${co2.toFixed(1)} kg` },
-    { label: 'Bat. Promedio', value: `${avgBat.toFixed(1)}%` },
-    { label: 'Autosuficiencia', value: `${selfSufficiency.toFixed(1)}%` },
-    { label: 'Eficiencia Media', value: `${avgEff.toFixed(1)}%` },
+    { label: 'Máx. Producción', value: `${maxProdKw.toFixed(1)} kW` },
     { label: 'Días analizados', value: String(summaries.length) },
-    { label: 'Balance Energético', value: `${(totalProd - totalCons).toFixed(1)} kWh` },
   ];
 
   let y = 36;
   y = drawKpiCards(doc, kpis, y);
   y += 2;
 
-  // Mini bar chart — production vs consumption per day
+  // Mini bar chart — production per day
   if (summaries.length > 0) {
-    y = drawSectionTitle(doc, 'Producción y Consumo Diario', y);
+    y = drawSectionTitle(doc, 'Producción Solar Diaria', y);
     const chartH = 40;
     const chartW = doc.internal.pageSize.getWidth() - 28;
     const barGroupW = Math.min(chartW / summaries.length, 10);
-    const maxVal = Math.max(...summaries.map(s => Math.max(s.totalProduction, s.totalConsumption)), 1);
+    const maxVal = Math.max(...summaries.map(s => s.totalProductionKwh), 1);
 
     // Axes
     doc.setDrawColor(...COLOR.border);
@@ -275,14 +258,11 @@ export async function exportSummariesPdf(
 
     summaries.slice(0, Math.floor(chartW / barGroupW)).forEach((s, i) => {
       const bx = 14 + i * barGroupW;
-      const prodH = (s.totalProduction / maxVal) * (chartH - 4);
-      const consH = (s.totalConsumption / maxVal) * (chartH - 4);
-      const bw = barGroupW * 0.35;
+      const prodH = (s.totalProductionKwh / maxVal) * (chartH - 4);
+      const bw = barGroupW * 0.6;
 
       doc.setFillColor(...COLOR.accent);
       doc.rect(bx + 0.5, y + chartH - prodH, bw, prodH, 'F');
-      doc.setFillColor(...COLOR.blue);
-      doc.rect(bx + bw + 1, y + chartH - consH, bw, consH, 'F');
 
       // X label (date)
       if (i % Math.max(1, Math.floor(summaries.length / 10)) === 0) {
@@ -310,9 +290,6 @@ export async function exportSummariesPdf(
     doc.setFontSize(7);
     doc.setTextColor(...COLOR.secondary);
     doc.text('Producción', 20, y + chartH + 9.5);
-    doc.setFillColor(...COLOR.blue);
-    doc.rect(50, y + chartH + 7, 4, 3, 'F');
-    doc.text('Consumo', 56, y + chartH + 9.5);
 
     y += chartH + 18;
   }
@@ -326,18 +303,13 @@ export async function exportSummariesPdf(
   (doc as any).autoTable({
     startY: y,
     head: [[
-      'Fecha', 'Producción\n(kWh)', 'Consumo\n(kWh)', 'CO₂ evitado\n(kg)',
-      'Bat. media\n(%)', 'Prod. máx\n(kW)', 'Cons. máx\n(kW)', 'Eficiencia\n(%)', 'Lecturas',
+      'Fecha', 'Producción\n(kWh)', 'CO₂ evitado\n(kg)', 'Prod. máx\n(kW)', 'Lecturas',
     ]],
     body: summaries.map(s => [
       s.date,
-      s.totalProduction.toFixed(2),
-      s.totalConsumption.toFixed(2),
-      (s.totalProduction * 0.5).toFixed(2),
-      s.avgBatteryLevel.toFixed(1),
-      s.maxProduction.toFixed(2),
-      s.maxConsumption.toFixed(2),
-      s.avgEfficiency.toFixed(1),
+      s.totalProductionKwh.toFixed(2),
+      (s.totalProductionKwh * 0.5).toFixed(2),
+      s.maxProductionKw.toFixed(2),
       s.readingCount,
     ]),
     headStyles: {
@@ -352,8 +324,7 @@ export async function exportSummariesPdf(
     alternateRowStyles: { fillColor: COLOR.light },
     columnStyles: {
       0: { halign: 'left', fontStyle: 'bold' },
-      2: { textColor: COLOR.blue },
-      3: { textColor: COLOR.green },
+      2: { textColor: COLOR.green },
     },
     margin: { left: 14, right: 14 },
     didDrawPage: (data: any) => {
@@ -385,19 +356,19 @@ export async function exportReadingsPdf(
     {
       label: 'Prod. promedio',
       value: readings.length
-        ? `${(readings.reduce((s, r) => s + r.production, 0) / readings.length).toFixed(2)} kW`
+        ? `${(readings.reduce((s, r) => s + r.productionKw, 0) / readings.length).toFixed(2)} kW`
         : '—',
     },
     {
-      label: 'Cons. promedio',
+      label: 'Prod. máxima',
       value: readings.length
-        ? `${(readings.reduce((s, r) => s + r.consumption, 0) / readings.length).toFixed(2)} kW`
+        ? `${Math.max(...readings.map(r => r.productionKw)).toFixed(2)} kW`
         : '—',
     },
     {
-      label: 'Bat. promedio',
+      label: 'CO₂ evitado',
       value: readings.length
-        ? `${(readings.reduce((s, r) => s + r.batteryLevel, 0) / readings.length).toFixed(1)}%`
+        ? `${(readings.reduce((s, r) => s + r.productionKw, 0) * (5 / 60) * 0.5).toFixed(1)} kg`
         : '—',
     },
   ];
@@ -408,15 +379,10 @@ export async function exportReadingsPdf(
 
   (doc as any).autoTable({
     startY: y,
-    head: [['Timestamp', 'Producción (kW)', 'Consumo (kW)', 'Batería (%)', 'Export Red (kW)', 'Import Red (kW)', 'Eficiencia (%)']],
+    head: [['Timestamp', 'Producción (kW)']],
     body: readings.map(r => [
       fmtTs(r.timestamp),
-      r.production.toFixed(2),
-      r.consumption.toFixed(2),
-      r.batteryLevel.toFixed(1),
-      r.gridExport.toFixed(3),
-      r.gridImport.toFixed(3),
-      r.efficiency.toFixed(1),
+      r.productionKw.toFixed(2),
     ]),
     headStyles: {
       fillColor: COLOR.secondary,
@@ -431,8 +397,6 @@ export async function exportReadingsPdf(
     columnStyles: {
       0: { halign: 'left', fontStyle: 'bold', cellWidth: 38 },
       1: { textColor: COLOR.accent as unknown as string },
-      2: { textColor: COLOR.blue as unknown as string },
-      3: { textColor: COLOR.purple as unknown as string },
     },
     margin: { left: 14, right: 14 },
     didDrawPage: () => {

@@ -24,29 +24,15 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
 
 
 async def _periodic_snapshot_saver():
-    """Save a solar snapshot to MongoDB every 5 minutes for historical trend data."""
+    """Save solar production to MongoDB every 5 minutes for historical trend analysis."""
     while True:
         try:
             await asyncio.sleep(300)  # 5 minutes
             from app.services.solar_service import get_solar_snapshot
             from app.services.lectura_service import save_reading
             snapshot_data = await get_solar_snapshot()
-            current = snapshot_data.get("current", {})
-            battery = snapshot_data.get("battery", {})
-            weather = snapshot_data.get("weather", {})
-            save_reading({
-                "production": current.get("production", 0),
-                "consumption": current.get("consumption", 0),
-                "batteryLevel": battery.get("chargeLevel", 0),
-                "gridExport": current.get("gridExport", 0),
-                "gridImport": current.get("gridImport", 0),
-                "efficiency": current.get("efficiency", 0),
-                "weather": {
-                    "temperature": weather.get("temperature"),
-                    "cloudCover": weather.get("cloudCover"),
-                    "solarRadiation": weather.get("solarRadiation"),
-                },
-            })
+            production_kw = snapshot_data.get("current", {}).get("production", 0)
+            save_reading(production_kw)
         except asyncio.CancelledError:
             raise
         except Exception as e:

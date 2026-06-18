@@ -74,8 +74,9 @@ import { SHADOW_PROFILE_QUERY, SAVE_SHADOW_PROFILE_MUTATION } from '@/lib/graphq
 
 const LAT = 23.1136;
 const LON = -82.3666;
-const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-const HOURS = Array.from({ length: 15 }, (_, i) => i + 5); // 05:00 → 19:00
+const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const MONTHS_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+const HOURS = Array.from({ length: 17 }, (_, i) => i + 5); // 05:00 → 21:00 (cubre horario de verano)
 
 interface TimeSlot {
   hour: number;
@@ -98,10 +99,36 @@ function fmt(h: number): string {
   return `${String(h).padStart(2, '0')}:00`;
 }
 
+function fmtDecimalHour(h: number): string {
+  const hh = Math.floor(h);
+  const mm = Math.round((h - hh) * 60);
+  if (mm === 60) return `${String(hh + 1).padStart(2, '0')}:00`;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 export default function SimuladorSombrasPage() {
   const router = useRouter();
-  const [month, setMonth] = useState(new Date().getMonth() + 1);
+
+  // currentDate se actualiza si cambia el día o el offset UTC (horario de verano)
+  const [currentDate, setCurrentDate] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => {
+      setCurrentDate(prev => {
+        const now = new Date();
+        const offsetChanged = now.getTimezoneOffset() !== prev.getTimezoneOffset();
+        const dayChanged    = now.getDate() !== prev.getDate() || now.getMonth() !== prev.getMonth();
+        return (offsetChanged || dayChanged) ? now : prev;
+      });
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const month      = currentDate.getMonth() + 1;
+  const tzOffset   = -currentDate.getTimezoneOffset() / 60; // e.g. -5 o -4
+  const isDST      = currentDate.getTimezoneOffset() < new Date(currentDate.getFullYear(), 0, 15).getTimezoneOffset();
+  const tzLabel    = `UTC${tzOffset >= 0 ? '+' : ''}${tzOffset}${isDST ? ' · horario de verano' : ''}`;
+
   const [showHelp, setShowHelp] = useState(false);
   const [slots, setSlots] = useState<TimeSlot[]>(
     HOURS.map(h => ({ hour: h, shadowPct: 0, prodOverride: null })),
@@ -152,13 +179,31 @@ export default function SimuladorSombrasPage() {
     }
   }, [slots]);
 
-  // Elevación solar por hora (para saber qué franjas son diurnas)
+  // Elevación solar por hora — depende de currentDate para detectar cambio horario de verano
   const sunElevations = useMemo(() => HOURS.map(h => {
-    const d = new Date();
-    d.setMonth(month - 1, 15); // día 15 representativo del mes
-    d.setHours(h, 30, 0, 0);
+    const d = new Date(currentDate.getFullYear(), month - 1, 15, h, 30, 0, 0);
     return { hour: h, elev: sunPosition(d, LAT, LON).elevationDeg };
-  }), [month]);
+  }), [currentDate, month]);
+
+  // Amanecer y atardecer aproximados (interpolación lineal entre muestras horarias en :30)
+  const { sunriseTime, sunsetTime } = useMemo(() => {
+    let riseH: number | null = null;
+    let setH: number | null  = null;
+    for (let i = 1; i < sunElevations.length; i++) {
+      const prev = sunElevations[i - 1];
+      const curr = sunElevations[i];
+      if (prev.elev <= 0 && curr.elev > 0 && riseH === null) {
+        riseH = (prev.hour + 0.5) + (-prev.elev) / (curr.elev - prev.elev);
+      }
+      if (prev.elev > 0 && curr.elev <= 0 && setH === null) {
+        setH = (prev.hour + 0.5) + prev.elev / (prev.elev - curr.elev);
+      }
+    }
+    return {
+      sunriseTime: riseH !== null ? fmtDecimalHour(riseH) : null,
+      sunsetTime:  setH  !== null ? fmtDecimalHour(setH)  : null,
+    };
+  }, [sunElevations]);
 
   const isDayHour = (h: number) =>
     (sunElevations.find(e => e.hour === h)?.elev ?? -1) > 0;
@@ -245,6 +290,8 @@ export default function SimuladorSombrasPage() {
                 La reducción de producción se calcula automáticamente como (100% − % sombra), pero
                 puedes ajustarla manualmente por franja si dispones de datos de irradiancia más precisos.
                 Solo se contabilizan las franjas con elevación solar {'>'} 0° (La Habana, {LAT}°N).
+                Las horas activas y los horarios de amanecer/atardecer se ajustan automáticamente
+                al cambio de horario de verano según el reloj del navegador.
               </p>
             </div>
           </div>
@@ -258,36 +305,29 @@ export default function SimuladorSombrasPage() {
           {/* ── LEFT: Editor ─────────────────────────────────────────────── */}
           <div className="flex-1 min-w-0 space-y-5">
 
-            {/* Mes */}
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <Sun className="w-4 h-4 text-amber-500" />
-                <span className="text-sm font-semibold text-gray-800">Mes de análisis</span>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0, 1fr))', gap: 6 }}>
-                {MONTHS.map((m, i) => (
-                  <button
-                    key={m}
-                    onClick={() => setMonth(i + 1)}
-                    className={`text-[11px] font-semibold py-1.5 rounded-lg transition-all ${
-                      month === i + 1
-                        ? 'bg-amber-500 text-white shadow-sm'
-                        : 'bg-gray-100 text-gray-600 hover:bg-amber-50 hover:text-amber-700'
-                    }`}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Gráfico */}
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
               <div className="flex items-center gap-2 mb-1">
                 <BarChart3 className="w-4 h-4 text-gray-400" />
                 <span className="text-sm font-semibold text-gray-800">Perfil de sombra diario</span>
-                <span className="ml-auto text-xs text-gray-400">{MONTHS[month - 1]}, día representativo</span>
+                <span className="ml-auto text-xs text-gray-400">
+                  {MONTHS_SHORT[month - 1]}, día 15 representativo
+                </span>
               </div>
+              {/* Amanecer / Atardecer */}
+              {(sunriseTime || sunsetTime) && (
+                <div className="flex items-center gap-3 mb-4 px-3 py-2 bg-amber-50 border border-amber-100 rounded-xl text-xs text-amber-900">
+                  <Sun className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  {sunriseTime && (
+                    <span>Amanecer <span className="font-bold font-mono">{sunriseTime}</span></span>
+                  )}
+                  {sunriseTime && sunsetTime && <span className="text-amber-300">·</span>}
+                  {sunsetTime && (
+                    <span>Atardecer <span className="font-bold font-mono">{sunsetTime}</span></span>
+                  )}
+                  <span className="ml-auto text-[10px] text-amber-600 whitespace-nowrap">{tzLabel}</span>
+                </div>
+              )}
               <p className="text-[11px] text-gray-400 mb-5">
                 Porcentaje de sombra sobre el panel por hora solar
               </p>
@@ -359,7 +399,7 @@ export default function SimuladorSombrasPage() {
                   Configuración por franja horaria
                 </h2>
                 <span className="ml-auto text-[11px] text-gray-400">
-                  {stats.total} franjas diurnas · {MONTHS[month - 1]}
+                  {stats.total} franjas diurnas
                 </span>
               </div>
 
@@ -413,7 +453,12 @@ export default function SimuladorSombrasPage() {
                           disabled={!isDay}
                           onChange={e => updateSlot(slot.hour, { shadowPct: Number(e.target.value) })}
                           className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer disabled:cursor-not-allowed"
-                          style={{ accentColor: isDay ? color : '#e2e8f0' }}
+                          style={{
+                            accentColor: isDay ? color : '#e2e8f0',
+                            background: isDay
+                              ? `linear-gradient(to right, ${color} ${slot.shadowPct}%, #e2e8f0 ${slot.shadowPct}%)`
+                              : '#f1f5f9',
+                          }}
                         />
                         <span
                           className="w-10 text-right text-sm font-black tabular-nums"
@@ -588,7 +633,10 @@ export default function SimuladorSombrasPage() {
                   { dt: 'Ubicación',        dd: 'La Habana, Cuba' },
                   { dt: 'Latitud',          dd: `${LAT}°N` },
                   { dt: 'Longitud',         dd: `${LON}°` },
-                  { dt: 'Mes seleccionado', dd: MONTHS[month - 1] },
+                  { dt: 'Huso horario',     dd: tzLabel },
+                  { dt: 'Mes de referencia', dd: MONTHS[month - 1] },
+                  { dt: 'Amanecer aprox.',  dd: sunriseTime ?? '—' },
+                  { dt: 'Atardecer aprox.', dd: sunsetTime  ?? '—' },
                   { dt: 'Franjas diurnas',  dd: `${stats.total} horas` },
                   { dt: 'Método',           dd: 'Estimación manual' },
                 ].map(({ dt, dd }) => (

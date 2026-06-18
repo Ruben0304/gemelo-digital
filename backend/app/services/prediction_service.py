@@ -9,58 +9,18 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional
 
-from .blackout_service import get_blackouts_for_range
 from .system_config import get_system_config
 from .weather_service import get_weather_with_fallback
 from .consumption_profile_service import get_active_profile, predict_from_profile
 from .inverter_service import list_inverters
 
 DEFAULT_PANEL_EFFICIENCY = 0.2
-BLACKOUT_LOAD_FACTOR = 0.6
-BLACKOUT_PRODUCTION_FACTOR = 0.85
-BLACKOUT_CONFIDENCE_PENALTY = 12
 
 
 def _parse_iso(date_str: str) -> datetime:
     if date_str.endswith("Z"):
         date_str = date_str[:-1] + "+00:00"
     return datetime.fromisoformat(date_str)
-
-
-def _flatten_blackout_windows(blackouts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    windows: List[Dict[str, Any]] = []
-    for schedule in blackouts or []:
-        for idx, interval in enumerate(schedule.get("intervals", [])):
-            start = _parse_iso(interval["start"])
-            end = _parse_iso(interval["end"])
-            if start < end:
-                windows.append(
-                    {
-                        "start": start,
-                        "end": end,
-                        "schedule": schedule,
-                        "intervalIndex": idx,
-                        "interval": interval,
-                    }
-                )
-    return sorted(windows, key=lambda item: item["start"])
-
-
-def _resolve_blackout_intensity(window: Dict[str, Any]) -> str:
-    duration = window["interval"].get("durationMinutes")
-    if duration is not None:
-        return "severo" if duration >= 180 else "moderado"
-    diff_hours = (window["end"] - window["start"]).total_seconds() / 3600
-    return "severo" if diff_hours >= 3 else "moderado"
-
-
-def _describe_blackout_window(window: Dict[str, Any]) -> Optional[str]:
-    notes = window["schedule"].get("notes")
-    if notes and notes.strip():
-        return notes.strip()
-    start_label = window["start"].strftime("%A %H:%M")
-    end_label = window["end"].strftime("%H:%M")
-    return f"Apagón programado {start_label} - {end_label}"
 
 
 def _resolve_inverter_context() -> Dict[str, float]:
@@ -224,49 +184,6 @@ def generate_hourly_predictions(weather_forecast: List[Dict[str, Any]], config: 
     return predictions
 
 
-def apply_blackout_adjustments(predictions: List[Dict[str, Any]], blackouts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    if not blackouts:
-        return predictions
-    windows = _flatten_blackout_windows(blackouts)
-    if not windows:
-        return predictions
-
-    adjusted: List[Dict[str, Any]] = []
-    for prediction in predictions:
-        timestamp = _parse_iso(prediction["timestamp"])
-        blackout_window = next((window for window in windows if window["start"] <= timestamp < window["end"]), None)
-        if not blackout_window:
-            adjusted.append(prediction)
-            continue
-
-        adjusted_production = max(
-            0.0,
-            round(prediction["expectedProduction"] * BLACKOUT_PRODUCTION_FACTOR, 2),
-        )
-        adjusted_consumption = max(
-            0.0,
-            round(prediction["expectedConsumption"] * BLACKOUT_LOAD_FACTOR, 2),
-        )
-        blackout_impact = {
-            "intervalStart": blackout_window["interval"]["start"],
-            "intervalEnd": blackout_window["interval"]["end"],
-            "loadFactor": BLACKOUT_LOAD_FACTOR,
-            "productionFactor": BLACKOUT_PRODUCTION_FACTOR,
-            "intensity": _resolve_blackout_intensity(blackout_window),
-            "note": _describe_blackout_window(blackout_window),
-        }
-        adjusted.append(
-            {
-                **prediction,
-                "expectedProduction": adjusted_production,
-                "expectedConsumption": adjusted_consumption,
-                "confidence": max(40, prediction["confidence"] - BLACKOUT_CONFIDENCE_PENALTY),
-                "blackoutImpact": blackout_impact,
-            }
-        )
-    return adjusted
-
-
 def _resolve_battery_dynamics(battery: Dict[str, Any]) -> Dict[str, float]:
     """Extrae DoD, tasas y eficiencia round-trip de la config de batería.
     Defaults conservadores: sin DoD (100%), sin límite de potencia, eff 100%.
@@ -291,7 +208,6 @@ def build_projected_solar_timeline(
     predictions: List[Dict[str, Any]],
     battery: Dict[str, Any],
     initial_battery_level: float = 75,
-    blackouts: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     timeline: List[Dict[str, Any]] = []
     dyn = _resolve_battery_dynamics(battery)
@@ -304,7 +220,6 @@ def build_projected_solar_timeline(
     # Si el nivel inicial está por debajo del SoC mínimo permitido, súbelo.
     initial_kwh = (initial_battery_level / 100) * battery_capacity_kwh
     stored_energy = max(initial_kwh, soc_min_kwh)
-    windows = _flatten_blackout_windows(blackouts or [])
 
     for prediction in predictions[:24]:
         production = max(0.0, prediction["expectedProduction"])
@@ -313,8 +228,6 @@ def build_projected_solar_timeline(
         grid_export = 0.0
         grid_import = 0.0
         battery_delta = 0.0
-        timestamp = _parse_iso(prediction["timestamp"])
-        blackout_active = any(window["start"] <= timestamp < window["end"] for window in windows)
 
         if net >= 0:
             # Excedente: cargar batería respetando tasa y eficiencia.
@@ -334,7 +247,7 @@ def build_projected_solar_timeline(
             from_battery_internal = from_battery_to_bus / eff if eff > 0 else 0
             stored_energy -= from_battery_internal
             battery_delta = -from_battery_internal
-            grid_import = 0.0 if blackout_active else demand - from_battery_to_bus
+            grid_import = demand - from_battery_to_bus
 
         denom = battery_capacity_kwh if battery_capacity_kwh > 0 else 1.0
         battery_level = max(0.0, min(100.0, (stored_energy / denom) * 100))
@@ -388,7 +301,6 @@ def generate_alerts(
     predictions: List[Dict[str, Any]],
     battery_status: Dict[str, Any],
     weather_forecast: List[Dict[str, Any]],
-    blackouts: Optional[List[Dict[str, Any]]] = None,
     capacity_kw: float = 50.0,
 ) -> List[Dict[str, Any]]:
     alerts: List[Dict[str, Any]] = []
@@ -399,7 +311,6 @@ def generate_alerts(
     deficit_threshold = capacity_kw * 0.2     # kW
     starting_level = battery_status["chargeLevel"]
     projected_min = battery_status.get("projectedMinLevel", starting_level)
-    blackout_windows = _flatten_blackout_windows(blackouts or [])
 
     if projected_min < 20:
         alerts.append(
@@ -462,22 +373,6 @@ def generate_alerts(
                 }
             )
 
-    now = datetime.utcnow()
-    upcoming_blackout = next((window for window in blackout_windows if window["start"] > now), None)
-    if upcoming_blackout:
-        start_label = upcoming_blackout["start"].strftime("%H:%Mh")
-        end_label = upcoming_blackout["end"].strftime("%H:%Mh")
-        severity = "critical" if (upcoming_blackout["interval"].get("durationMinutes") or 0) > 180 else "warning"
-        alerts.append(
-            {
-                "id": f"planned-blackout-{int(upcoming_blackout['start'].timestamp())}",
-                "type": severity,
-                "title": "Apagón Programado",
-                "message": f"Se ha planificado una interrupción entre {start_label} y {end_label}. Prepárese con antelación.",
-                "timestamp": datetime.utcnow().isoformat(),
-            }
-        )
-
     return alerts
 
 
@@ -485,7 +380,6 @@ def generate_recommendations(
     predictions: List[Dict[str, Any]],
     battery_status: Dict[str, Any],
     config: Dict[str, Any],
-    blackouts: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:
     recommendations: List[str] = []
     solar_capacity = max(config["solar"].get("capacityKw") or 0.0001, 0.0001)
@@ -525,28 +419,11 @@ def generate_recommendations(
             "Día de baja producción estimada. Priorice consumos esenciales y considere apoyo de la red para cargas críticas."
         )
 
-    blackout_windows = _flatten_blackout_windows(blackouts or [])
-    blackout_now = current_prediction.get("blackoutImpact") if current_prediction else None
-    if blackout_now:
-        recommendations.append(
-            "Durante el apagón programado actual, reserve energía para cargas imprescindibles y supervise el nivel de batería cada hora."
-        )
-    midnight = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    upcoming = next((window for window in blackout_windows if window["start"] >= midnight), None)
-    if upcoming and not blackout_now:
-        start_info = upcoming["start"].strftime("%A %H:%M")
-        recommendations.append(
-            f"Planifique el consumo crítico antes de {start_info}. Mantenga la batería por encima del 60% previo al apagón."
-        )
-
     return recommendations
 
 
 async def get_predictions_bundle() -> Dict[str, Any]:
     config = get_system_config()
-    now = datetime.utcnow()
-    range_end = now + timedelta(days=2)
-    blackouts = get_blackouts_for_range(now, range_end)
     weather_data = await get_weather_with_fallback(
         config["location"]["lat"],
         config["location"]["lon"],
@@ -554,33 +431,21 @@ async def get_predictions_bundle() -> Dict[str, Any]:
         config["location"]["name"],
     )
     predictions = generate_hourly_predictions(weather_data["forecast"], config)
-    adjusted_predictions = apply_blackout_adjustments(predictions, blackouts)
-    timeline = build_projected_solar_timeline(
-        adjusted_predictions,
-        config["battery"],
-        75,
-        blackouts,
-    )
+    timeline = build_projected_solar_timeline(predictions, config["battery"], 75)
     battery_projection = generate_battery_projection(
         timeline,
-        adjusted_predictions,
+        predictions,
         config["battery"]["capacityKwh"],
     )
     alerts = generate_alerts(
-        adjusted_predictions,
+        predictions,
         battery_projection,
         weather_data["forecast"],
-        blackouts,
         config["solar"]["capacityKw"],
     )
-    recommendations = generate_recommendations(
-        adjusted_predictions,
-        battery_projection,
-        config,
-        blackouts,
-    )
+    recommendations = generate_recommendations(predictions, battery_projection, config)
     return {
-        "predictions": adjusted_predictions,
+        "predictions": predictions,
         "alerts": alerts,
         "recommendations": recommendations,
         "battery": battery_projection,
@@ -588,5 +453,4 @@ async def get_predictions_bundle() -> Dict[str, Any]:
         "weather": weather_data,
         "timestamp": datetime.utcnow().isoformat(),
         "config": config,
-        "blackouts": blackouts,
     }

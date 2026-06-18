@@ -65,7 +65,7 @@ const sections = [
   {
     href: '/ajustes/sombras',
     title: 'Configurar sombra',
-    subtitle: 'Simulador 3D de sombras sobre paneles solares',
+    subtitle: 'Perfil de sombra por franja horaria y su impacto en la producción',
     icon: <Sun className="h-5 w-5 text-orange-500" />,
   },
 ] as const;
@@ -148,7 +148,7 @@ export default function AjustesHomePage() {
             <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
               <p className="mb-3 text-sm font-medium text-red-800">
                 ¿Confirmar restablecimiento? Se eliminarán paneles, baterías, inversores,
-                electrodomésticos, apagones y la configuración de ubicación. Los usuarios y
+                electrodomésticos y la configuración de ubicación. Los usuarios y
                 lecturas históricas se conservarán.
               </p>
               <div className="flex gap-2">

@@ -22,6 +22,7 @@ export interface WeatherData {
   locationName?: string;   // Friendly location name
   lastUpdated?: string;    // ISO string for data timestamp
   description?: string;    // Textual weather summary
+  weatherCode?: number;    // WMO weather code
 }
 
 export interface DayForecast {
@@ -73,7 +74,7 @@ export interface Prediction {
   expectedProduction: number; // kWh
   expectedConsumption: number; // kWh
   confidence: number;        // % - Prediction confidence
-  blackoutImpact?: BlackoutImpact;
+
 }
 
 export interface Alert {
@@ -201,40 +202,58 @@ export interface User {
 export interface HistoricalReading {
   _id: string;
   timestamp: string;
-  production: number;    // kW
-  consumption: number;   // kW
-  batteryLevel: number;  // %
-  gridExport: number;    // kW
-  gridImport: number;    // kW
-  efficiency: number;    // %
+  productionKw: number;  // kW
 }
 
 export interface DailySummary {
   date: string;
-  totalProduction: number;    // kWh
-  totalConsumption: number;   // kWh
-  avgBatteryLevel: number;    // %
-  maxProduction: number;      // kW
-  maxConsumption: number;     // kW
-  avgEfficiency: number;      // %
+  totalProductionKwh: number;  // kWh
+  maxProductionKw: number;     // kW
   readingCount: number;
 }
 
-export interface BlackoutInterval {
-  start: string;
-  end: string;
-  durationMinutes?: number;
+export interface ApplianceBatch {
+  batchId: string;
+  applianceId: string;
+  applianceName: string;
+  filename: string;
+  uploadedAt: string;
+  startDate: string;
+  endDate: string;
+  samples: number;
+  kwhDayEstimatedThis: number;
+  kwhDayEstimatedOthers: number;
 }
 
-export interface BlackoutSchedule {
-  _id?: string;
-  date: string; // ISO date (00:00:00 local)
-  intervals: BlackoutInterval[];
-  province?: string;
-  municipality?: string;
-  notes?: string;
-  createdAt?: string;
-  updatedAt?: string;
+export interface BatchPreview {
+  samples: number;
+  startDate: string | null;
+  endDate: string | null;
+}
+
+export interface DailyReportAppliance {
+  applianceId: string;
+  name: string;
+  mode: 'medido' | 'estimado';
+  kwhDay: number;
+  kwhDayEstimated: number | null;
+  errorPercent: number | null;
+  readingCount: number;
+}
+
+export interface DailyReport {
+  date: string;
+  productionKwh: number | null;
+  measuredConsumptionKwh: number;
+  estimatedConsumptionKwh: number;
+  totalConsumptionKwh: number;
+  hasRealData: boolean;
+  appliances: DailyReportAppliance[];
+}
+
+export interface ApplianceReadingPoint {
+  timestamp: string;
+  powerKw: number;
 }
 
 export interface ConsumptionProfile {
@@ -258,11 +277,3 @@ export interface ConsumptionPrediction {
   isWeekend: boolean;
 }
 
-export interface BlackoutImpact {
-  intervalStart: string;
-  intervalEnd: string;
-  loadFactor: number;
-  productionFactor: number;
-  intensity: 'moderado' | 'severo';
-  note?: string;
-}

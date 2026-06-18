@@ -1,16 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Alert,
   Prediction,
   WeatherData,
   BatteryStatus,
   SystemConfig,
-  BlackoutSchedule,
   ConsumptionPrediction,
 } from '@/types';
-import { Power, Info, BrainCircuit, LineChart, ChevronDown, ChevronUp, AlertTriangle, AlertOctagon, Lightbulb } from 'lucide-react';
+import { Info, BrainCircuit, LineChart, ChevronDown, ChevronUp, AlertTriangle, AlertOctagon, Lightbulb } from 'lucide-react';
 
 interface PredictionsPanelProps {
   predictions: Prediction[];
@@ -19,7 +18,6 @@ interface PredictionsPanelProps {
   weather?: WeatherData | null;
   batteryProjection?: BatteryStatus;
   config?: SystemConfig;
-  blackouts?: BlackoutSchedule[];
   consumptionPredictions?: ConsumptionPrediction[];
   solarModelR2?: number | null;
 }
@@ -29,17 +27,33 @@ interface PredictionsPanelProps {
 // ---------------------------------------------------------------------------
 function Tooltip({ content, children }: { content: React.ReactNode; children: React.ReactNode }) {
   const [visible, setVisible] = useState(false);
+  const tooltipRef = useRef<HTMLSpanElement>(null);
+  const [shift, setShift] = useState(0);
+
+  useEffect(() => {
+    if (!visible || !tooltipRef.current) return;
+    const rect = tooltipRef.current.getBoundingClientRect();
+    const overflowRight = rect.right - window.innerWidth + 8;
+    const overflowLeft = 8 - rect.left;
+    if (overflowRight > 0) setShift(-overflowRight);
+    else if (overflowLeft > 0) setShift(overflowLeft);
+    else setShift(0);
+  }, [visible]);
+
   return (
     <span
       className="relative inline-flex items-center cursor-help"
       onMouseEnter={() => setVisible(true)}
-      onMouseLeave={() => setVisible(false)}
+      onMouseLeave={() => { setVisible(false); setShift(0); }}
     >
       {children}
       {visible && (
-        <span className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2
-                         w-72 rounded-lg bg-gray-900 text-white text-xs px-3 py-2.5 shadow-xl
-                         pointer-events-none leading-relaxed whitespace-pre-line">
+        <span
+          ref={tooltipRef}
+          style={{ transform: `translateX(calc(-50% + ${shift}px))` }}
+          className="absolute z-50 bottom-full left-1/2 mb-2
+                     w-72 rounded-lg bg-gray-900 text-white text-xs px-3 py-2.5 shadow-xl
+                     pointer-events-none leading-relaxed whitespace-pre-line">
           {content}
           <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
         </span>
@@ -90,12 +104,10 @@ export default function PredictionsPanel({
   predictions,
   alerts = [],
   recommendations = [],
-  blackouts = [],
   consumptionPredictions = [],
   solarModelR2,
 }: PredictionsPanelProps) {
   const [methodOpen, setMethodOpen] = useState(false);
-  const now = new Date();
 
   // ── Confidence averages ──────────────────────────────────────────────────
   const avgSolarConf =
@@ -111,37 +123,11 @@ export default function PredictionsPanel({
         )
       : null;
 
-  // ── Blackouts ────────────────────────────────────────────────────────────
-  const blackoutEntries = blackouts
-    .flatMap((schedule) =>
-      schedule.intervals.map((interval, idx) => {
-        const start = new Date(interval.start);
-        const end = new Date(interval.end);
-        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start >= end)
-          return null;
-        const duration =
-          interval.durationMinutes ??
-          Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000));
-        return {
-          id: `${schedule._id ?? schedule.date}-${idx}`,
-          start, end, duration,
-          intensity: duration >= 180 ? 'severo' : 'moderado',
-          location: schedule.municipality ?? schedule.province,
-          note: schedule.notes,
-        };
-      }),
-    )
-    .filter((e): e is NonNullable<typeof e> => Boolean(e))
-    .sort((a, b) => a.start.getTime() - b.start.getTime());
-
-  const activeBlackout = blackoutEntries.find((e) => e.start <= now && e.end > now);
-  const upcomingBlackouts = blackoutEntries.filter((e) => e.end > now).slice(0, 4);
-
   return (
     <div className="space-y-5">
 
       {/* ── Prediction confidence info card ─────────────────────────────── */}
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
         <div className="px-5 py-4 flex flex-wrap items-center gap-4">
 
           {/* Solar confidence */}
@@ -291,57 +277,6 @@ export default function PredictionsPanel({
         </div>
       )}
 
-      {/* ── Blackout schedule ────────────────────────────────────────────── */}
-      {blackoutEntries.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <Power className="w-4 h-4 text-red-500" />
-            <h3 className="text-sm font-semibold text-gray-900">
-              Apagones programados ({blackoutEntries.length})
-            </h3>
-          </div>
-
-          {activeBlackout && (
-            <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5">
-              <p className="text-sm font-semibold text-red-600">
-                Apagón en curso · {formatDay(activeBlackout.start)}{' '}
-                {formatTime(activeBlackout.start)} – {formatTime(activeBlackout.end)}
-              </p>
-              <p className="text-xs text-red-500 mt-0.5">
-                Intensidad {activeBlackout.intensity} · {activeBlackout.duration} min
-                {activeBlackout.location && ` · Zona ${activeBlackout.location}`}
-              </p>
-            </div>
-          )}
-
-          {!activeBlackout && (
-            <p className="text-xs text-gray-500 mb-3">
-              No hay apagones activos ahora.
-            </p>
-          )}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-            {upcomingBlackouts.length === 0 ? (
-              <p className="text-xs text-gray-500 col-span-full">
-                Sin interrupciones planificadas en las próximas 48 h.
-              </p>
-            ) : (
-              upcomingBlackouts.map((e) => (
-                <div key={e.id} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5">
-                  <p className="text-sm font-semibold text-gray-900">
-                    {formatDay(e.start)} · {formatTime(e.start)} – {formatTime(e.end)}
-                  </p>
-                  <p className="text-xs text-gray-600 mt-0.5">
-                    {e.duration} min · Intensidad {e.intensity}
-                    {e.location && ` · ${e.location}`}
-                  </p>
-                  {e.note && <p className="text-xs text-gray-500 mt-0.5">{e.note}</p>}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

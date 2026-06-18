@@ -148,6 +148,7 @@ async def fetch_open_meteo_weather(
         "locationName": location_name,
         "lastUpdated": datetime.utcnow().isoformat(),
         "description": _weather_description(current["weather_code"]),
+        "weatherCode": current["weather_code"],
     }
 
 

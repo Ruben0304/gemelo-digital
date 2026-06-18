@@ -21,16 +21,12 @@ import {
   CalendarIcon,
   CalendarDaysIcon,
   ArrowPathIcon,
-  CloudArrowDownIcon,
   TableCellsIcon,
   DocumentTextIcon,
-  CheckCircleIcon,
-  ExclamationTriangleIcon,
-  XCircleIcon,
   SunIcon,
   SparklesIcon,
 } from '@heroicons/react/24/outline';
-import { executeQuery, executeMutation } from '@/lib/graphql-client';
+import { executeQuery } from '@/lib/graphql-client';
 import {
   exportReadingsCsv,
   exportSummariesCsv,
@@ -51,12 +47,7 @@ const HISTORICAL_READINGS_QUERY = `
     historicalReadings(startDate: $startDate, endDate: $endDate, limit: $limit) {
       _id
       timestamp
-      production
-      consumption
-      batteryLevel
-      gridExport
-      gridImport
-      efficiency
+      productionKw
     }
   }
 `;
@@ -65,20 +56,10 @@ const DAILY_SUMMARIES_QUERY = `
   query DailySummaries($days: Int) {
     dailySummaries(days: $days) {
       date
-      totalProduction
-      totalConsumption
-      avgBatteryLevel
-      maxProduction
-      maxConsumption
-      avgEfficiency
+      totalProductionKwh
+      maxProductionKw
       readingCount
     }
-  }
-`;
-
-const SEED_MUTATION = `
-  mutation SeedHistoricalData($days: Int) {
-    seedHistoricalData(days: $days)
   }
 `;
 
@@ -162,21 +143,9 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
   const [readings, setReadings] = useState<HistoricalReading[]>([]);
   const [summaries, setSummaries] = useState<DailySummary[]>([]);
   const [loading, setLoading] = useState(false);
-  const [seeding, setSeeding] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState(14);
-  const [seedMessage, setSeedMessage] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem('gd_auth_user');
-      if (stored) setIsAdmin(JSON.parse(stored)?.role === 'admin');
-    } catch {
-      setIsAdmin(false);
-    }
-  }, []);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -212,25 +181,6 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
     if (mode === 'historico') fetchData();
   }, [mode, fetchData]);
 
-  const handleSeed = async () => {
-    setSeeding(true);
-    setSeedMessage(null);
-    try {
-      const data = await executeMutation<{ seedHistoricalData: number }>(SEED_MUTATION, { days: 30 });
-      const count = data?.seedHistoricalData ?? 0;
-      setSeedMessage(
-        count > 0
-          ? { type: 'success', text: `Se generaron ${count} lecturas simuladas para los últimos 30 días.` }
-          : { type: 'warning', text: 'Los datos ya existían. No se insertaron registros adicionales.' },
-      );
-      await fetchData();
-    } catch (err) {
-      setSeedMessage({ type: 'error', text: err instanceof Error ? err.message : 'Error al generar datos.' });
-    } finally {
-      setSeeding(false);
-    }
-  };
-
   const handleExportCsv = () => {
     if (histView === 'daily' && summaries.length > 0) exportSummariesCsv(summaries, 'GemeloDigital');
     else if (histView === 'hourly' && readings.length > 0) exportReadingsCsv(readings, 'GemeloDigital');
@@ -257,21 +207,18 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
   // ── Historical derived data ──
   const histHasData = histView === 'daily' ? summaries.length > 0 : readings.length > 0;
 
-  const totalProduction = summaries.reduce((s, d) => s + d.totalProduction, 0);
-  const totalConsumption = summaries.reduce((s, d) => s + d.totalConsumption, 0);
+  const totalProduction = summaries.reduce((s, d) => s + d.totalProductionKwh, 0);
   const totalCo2 = totalProduction * 0.5;
-  const selfSufficiency = totalConsumption > 0 ? Math.min(100, (totalProduction / totalConsumption) * 100) : 0;
+  const maxProductionKw = summaries.length > 0 ? Math.max(...summaries.map((d) => d.maxProductionKw)) : 0;
 
   const hourlyChartData = readings.map((r) => ({
     time: formatHour(r.timestamp),
-    Producción: r.production,
-    Consumo: r.consumption,
+    Producción: r.productionKw,
   }));
 
   const dailyChartData = summaries.map((s) => ({
     fecha: formatDate(s.date),
-    Producción: s.totalProduction,
-    Consumo: s.totalConsumption,
+    Producción: s.totalProductionKwh,
   }));
 
   // ── Prediction derived data ──
@@ -281,7 +228,7 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
   // No extrapolamos más allá: sin datos meteorológicos no hay predicción fiable.
   const typicalConsumption = useMemo(() => {
     if (summaries.length === 0) return null;
-    return summaries.reduce((s, d) => s + d.totalConsumption, 0) / summaries.length;
+    return summaries.reduce((s, d) => s + d.totalProductionKwh, 0) / summaries.length;
   }, [summaries]);
 
   const prediction = useMemo(() => {
@@ -364,19 +311,14 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
           setDays={setDays}
           loading={loading}
           error={error}
-          isAdmin={isAdmin}
-          seeding={seeding}
           exporting={exporting}
-          seedMessage={seedMessage}
           histHasData={histHasData}
           totalProduction={totalProduction}
-          totalConsumption={totalConsumption}
           totalCo2={totalCo2}
-          selfSufficiency={selfSufficiency}
+          maxProductionKw={maxProductionKw}
           dailyChartData={dailyChartData}
           hourlyChartData={hourlyChartData}
           onRefresh={fetchData}
-          onSeed={handleSeed}
           onExportCsv={handleExportCsv}
           onExportPdf={handleExportPdf}
         />
@@ -396,19 +338,14 @@ function HistoricalView({
   setDays,
   loading,
   error,
-  isAdmin,
-  seeding,
   exporting,
-  seedMessage,
   histHasData,
   totalProduction,
-  totalConsumption,
   totalCo2,
-  selfSufficiency,
+  maxProductionKw,
   dailyChartData,
   hourlyChartData,
   onRefresh,
-  onSeed,
   onExportCsv,
   onExportPdf,
 }: {
@@ -418,19 +355,14 @@ function HistoricalView({
   setDays: (d: number) => void;
   loading: boolean;
   error: string | null;
-  isAdmin: boolean;
-  seeding: boolean;
   exporting: boolean;
-  seedMessage: { type: 'success' | 'warning' | 'error'; text: string } | null;
   histHasData: boolean;
   totalProduction: number;
-  totalConsumption: number;
   totalCo2: number;
-  selfSufficiency: number;
-  dailyChartData: Array<{ fecha: string; Producción: number; Consumo: number }>;
-  hourlyChartData: Array<{ time: string; Producción: number; Consumo: number }>;
+  maxProductionKw: number;
+  dailyChartData: Array<{ fecha: string; Producción: number }>;
+  hourlyChartData: Array<{ time: string; Producción: number }>;
   onRefresh: () => void;
-  onSeed: () => void;
   onExportCsv: () => void;
   onExportPdf: () => void;
 }) {
@@ -441,7 +373,7 @@ function HistoricalView({
       {/* Controls */}
       <div className="flex flex-wrap items-center justify-end gap-3">
         <div className="mr-auto text-sm text-slate-500">
-          Serie temporal de producción y consumo
+          Serie temporal de producción solar
         </div>
 
         <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
@@ -480,18 +412,6 @@ function HistoricalView({
           Actualizar
         </button>
 
-        {isAdmin && (
-          <button
-            onClick={onSeed}
-            disabled={seeding}
-            className="flex items-center gap-2 rounded-xl border border-indigo-500 bg-indigo-700 px-3 py-2 text-sm text-white transition hover:bg-indigo-600 disabled:opacity-50"
-            title="Generar datos simulados de demostración"
-          >
-            <CloudArrowDownIcon className={`h-4 w-4 ${seeding ? 'animate-bounce' : ''}`} />
-            {seeding ? 'Generando…' : 'Generar datos de prueba'}
-          </button>
-        )}
-
         {histHasData && (
           <>
             <button
@@ -515,31 +435,12 @@ function HistoricalView({
         )}
       </div>
 
-      {seedMessage && (
-        <div
-          role={seedMessage.type === 'error' ? 'alert' : 'status'}
-          className={`flex items-center gap-2 rounded-xl border px-4 py-3 text-sm ${
-            seedMessage.type === 'success'
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-              : seedMessage.type === 'warning'
-                ? 'border-amber-200 bg-amber-50 text-amber-700'
-                : 'border-red-200 bg-red-50 text-red-600'
-          }`}
-        >
-          {seedMessage.type === 'success' && <CheckCircleIcon className="h-5 w-5 flex-shrink-0" />}
-          {seedMessage.type === 'warning' && <ExclamationTriangleIcon className="h-5 w-5 flex-shrink-0" />}
-          {seedMessage.type === 'error' && <XCircleIcon className="h-5 w-5 flex-shrink-0" />}
-          <span>{seedMessage.text}</span>
-        </div>
-      )}
-
       {/* KPIs (daily view) */}
       {histView === 'daily' && histHasData && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           <KpiCard label="Producción total" value={`${totalProduction.toFixed(1)} kWh`} color="text-yellow-600" />
-          <KpiCard label="Consumo total" value={`${totalConsumption.toFixed(1)} kWh`} color="text-blue-600" />
           <KpiCard label="CO₂ evitado" value={`${totalCo2.toFixed(1)} kg`} color="text-green-600" />
-          <KpiCard label="Autosuficiencia" value={`${selfSufficiency.toFixed(0)} %`} color="text-emerald-600" />
+          <KpiCard label="Máx. producción" value={`${maxProductionKw.toFixed(1)} kW`} color="text-emerald-600" />
         </div>
       )}
 
@@ -552,9 +453,7 @@ function HistoricalView({
           <ChartBarIcon className="mx-auto mb-4 h-12 w-12 text-slate-300" />
           <p className="font-medium text-slate-600">Sin datos históricos</p>
           <p className="mx-auto mt-1 mb-4 max-w-md text-sm text-slate-500">
-            {isAdmin
-              ? 'El sistema aún no ha acumulado lecturas. Use «Generar datos de prueba» para poblar la serie histórica.'
-              : 'El sistema aún no ha acumulado lecturas para el período seleccionado.'}
+            El sistema aún no ha acumulado lecturas para el período seleccionado.
           </p>
         </div>
       )}
@@ -562,7 +461,7 @@ function HistoricalView({
       {!noData && (
         <div className="rounded-2xl border border-slate-200 bg-white p-6">
           <h3 className="mb-4 text-sm font-semibold text-slate-700">
-            {histView === 'daily' ? 'Producción y consumo diarios (kWh)' : 'Producción y consumo por hora (kW)'}
+            {histView === 'daily' ? 'Producción solar diaria (kWh)' : 'Producción solar por hora (kW)'}
           </h3>
           <ResponsiveContainer width="100%" height={320}>
             {histView === 'daily' ? (
@@ -572,18 +471,13 @@ function HistoricalView({
                     <stop offset="0%" stopColor="#facc15" stopOpacity={0.95} />
                     <stop offset="100%" stopColor="#fde68a" stopOpacity={0.75} />
                   </linearGradient>
-                  <linearGradient id="gCons" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#60a5fa" stopOpacity={0.95} />
-                    <stop offset="100%" stopColor="#bfdbfe" stopOpacity={0.75} />
-                  </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#eef2f6" vertical={false} />
                 <XAxis dataKey="fecha" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: '#64748b', fontSize: 11 }} unit=" kWh" axisLine={false} tickLine={false} />
                 <Tooltip content={<ChartTooltip unit=" kWh" />} cursor={{ fill: 'rgba(148,163,184,0.08)' }} />
                 <Legend wrapperStyle={{ color: '#475569', fontSize: 12 }} />
-                <Bar dataKey="Producción" fill="url(#gProd)" radius={[4, 4, 0, 0]} maxBarSize={34} />
-                <Bar dataKey="Consumo" fill="url(#gCons)" radius={[4, 4, 0, 0]} maxBarSize={34} />
+                <Bar dataKey="Producción" fill="url(#gProd)" radius={[4, 4, 0, 0]} maxBarSize={48} />
               </ComposedChart>
             ) : (
               <AreaChart data={hourlyChartData}>
@@ -591,10 +485,6 @@ function HistoricalView({
                   <linearGradient id="gProdArea" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#facc15" stopOpacity={0.4} />
                     <stop offset="100%" stopColor="#facc15" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="gConsArea" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#60a5fa" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#60a5fa" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#eef2f6" vertical={false} />
@@ -609,7 +499,6 @@ function HistoricalView({
                 <Tooltip content={<ChartTooltip unit=" kW" />} />
                 <Legend wrapperStyle={{ color: '#475569', fontSize: 12 }} />
                 <Area type="monotone" dataKey="Producción" stroke="#eab308" strokeWidth={2} fill="url(#gProdArea)" />
-                <Area type="monotone" dataKey="Consumo" stroke="#3b82f6" strokeWidth={2} fill="url(#gConsArea)" />
               </AreaChart>
             )}
           </ResponsiveContainer>

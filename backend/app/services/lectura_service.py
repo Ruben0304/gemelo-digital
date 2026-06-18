@@ -1,11 +1,14 @@
 """
-Historical readings service — persists solar snapshots for trend analysis.
+Historical production readings — persists solar model snapshots for trend analysis.
 Collection: lecturas_historicas
+
+Stores only productionKw (from the solar model) every 5 minutes.
+Consumption is computed on-demand from appliance data (medicion_service).
 """
 from __future__ import annotations
 
-import random
 import math
+import random
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -28,19 +31,13 @@ def _ensure_indexes() -> None:
 # Write
 # ---------------------------------------------------------------------------
 
-def save_reading(snapshot: Dict[str, Any]) -> str:
-    """Persist a solar snapshot. Returns the inserted id as string."""
+def save_reading(production_kw: float) -> str:
+    """Persist a solar production snapshot. Returns the inserted id as string."""
     _ensure_indexes()
     now = datetime.now(timezone.utc)
     doc = {
         "timestamp": now,
-        "production": round(float(snapshot.get("production", 0)), 3),
-        "consumption": round(float(snapshot.get("consumption", 0)), 3),
-        "batteryLevel": round(float(snapshot.get("batteryLevel", 0)), 1),
-        "gridExport": round(float(snapshot.get("gridExport", 0)), 3),
-        "gridImport": round(float(snapshot.get("gridImport", 0)), 3),
-        "efficiency": round(float(snapshot.get("efficiency", 0)), 1),
-        "weather": snapshot.get("weather"),
+        "productionKw": round(float(production_kw), 3),
     }
     result = _col().insert_one(doc)
     return str(result.inserted_id)
@@ -55,7 +52,7 @@ def get_readings(
     end_date: Optional[str] = None,
     limit: int = 288,
 ) -> List[Dict[str, Any]]:
-    """Query historical readings with optional date range filter."""
+    """Query historical production readings with optional date range filter."""
     query: Dict[str, Any] = {}
     if start_date or end_date:
         ts_filter: Dict[str, Any] = {}
@@ -70,9 +67,7 @@ def get_readings(
 
 
 def get_daily_summaries(days: int = 30) -> List[Dict[str, Any]]:
-    """Aggregate readings into daily summary statistics."""
-    from datetime import date
-
+    """Aggregate production readings into daily totals."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 365)))
 
     pipeline = [
@@ -85,12 +80,9 @@ def get_daily_summaries(days: int = 30) -> List[Dict[str, Any]]:
                     "day": {"$dayOfMonth": "$timestamp"},
                 },
                 "date": {"$first": "$timestamp"},
-                "totalProduction": {"$sum": "$production"},
-                "totalConsumption": {"$sum": "$consumption"},
-                "avgBatteryLevel": {"$avg": "$batteryLevel"},
-                "maxProduction": {"$max": "$production"},
-                "maxConsumption": {"$max": "$consumption"},
-                "avgEfficiency": {"$avg": "$efficiency"},
+                # Readings every 5 min → kWh = kW × (5/60)
+                "totalProductionKwh": {"$sum": {"$multiply": ["$productionKw", 0.08333]}},
+                "maxProductionKw": {"$max": "$productionKw"},
                 "count": {"$sum": 1},
             }
         },
@@ -103,15 +95,34 @@ def get_daily_summaries(days: int = 30) -> List[Dict[str, Any]]:
         date_str = d.strftime("%Y-%m-%d") if isinstance(d, datetime) else str(d)
         summaries.append({
             "date": date_str,
-            "totalProduction": round(r["totalProduction"], 2),
-            "totalConsumption": round(r["totalConsumption"], 2),
-            "avgBatteryLevel": round(r["avgBatteryLevel"], 1),
-            "maxProduction": round(r["maxProduction"], 2),
-            "maxConsumption": round(r["maxConsumption"], 2),
-            "avgEfficiency": round(r["avgEfficiency"], 1),
+            "totalProductionKwh": round(r["totalProductionKwh"], 2),
+            "maxProductionKw": round(r["maxProductionKw"], 2),
             "readingCount": r["count"],
         })
     return summaries
+
+
+def get_day_production(date_str: str) -> Optional[float]:
+    """
+    Return total production kWh for a given date (YYYY-MM-DD).
+    Returns None if no readings exist for that day.
+    """
+    try:
+        day = datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+    day_start = day.replace(tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+
+    pipeline = [
+        {"$match": {"timestamp": {"$gte": day_start, "$lt": day_end}}},
+        {"$group": {"_id": None, "total": {"$sum": {"$multiply": ["$productionKw", 0.08333]}}, "count": {"$sum": 1}}},
+    ]
+    results = list(_col().aggregate(pipeline))
+    if not results or results[0]["count"] == 0:
+        return None
+    return round(results[0]["total"], 3)
 
 
 def _serialize(doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -119,23 +130,17 @@ def _serialize(doc: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "_id": str(doc["_id"]),
         "timestamp": ts.isoformat() if isinstance(ts, datetime) else str(ts),
-        "production": doc.get("production", 0.0),
-        "consumption": doc.get("consumption", 0.0),
-        "batteryLevel": doc.get("batteryLevel", 0.0),
-        "gridExport": doc.get("gridExport", 0.0),
-        "gridImport": doc.get("gridImport", 0.0),
-        "efficiency": doc.get("efficiency", 0.0),
+        "productionKw": doc.get("productionKw", 0.0),
     }
 
 
 # ---------------------------------------------------------------------------
-# Seed (demo / thesis data)
+# Seed (demo data — production only)
 # ---------------------------------------------------------------------------
 
 def seed_historical_data(days: int = 30) -> int:
     """
-    Insert simulated hourly readings for the past `days` days.
-    Returns number of documents inserted.
+    Insert simulated 5-minute solar production readings for the past `days` days.
     Skips if data already exists for that period.
     """
     _ensure_indexes()
@@ -143,55 +148,27 @@ def seed_historical_data(days: int = 30) -> int:
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     existing = col.count_documents({"timestamp": {"$gte": cutoff}})
     if existing > 0:
-        return 0  # Already seeded
+        return 0
 
-    docs = []
     capacity_kw = 50.0
-    battery_capacity = 100.0
-    battery_level = 60.0  # start at 60%
-
     now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
     start = now - timedelta(hours=days * 24)
 
-    for i in range(days * 24):
-        ts = start + timedelta(hours=i)
+    docs = []
+    # 5-minute intervals
+    total_intervals = days * 24 * 12
+    for i in range(total_intervals):
+        ts = start + timedelta(minutes=i * 5)
         hour = ts.hour
         day_of_year = ts.timetuple().tm_yday
-        # Seasonal factor (Cuba, more production in summer)
         seasonal = 0.85 + 0.15 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
-        # Time-of-day production curve
         if 6 <= hour <= 19:
             solar_factor = math.exp(-0.5 * ((hour - 13) / 3.5) ** 2)
         else:
             solar_factor = 0.0
-        cloud_cover = random.uniform(0, 60)
-        cloud_factor = 1 - cloud_cover * 0.006
-        production = round(capacity_kw * solar_factor * seasonal * cloud_factor * random.uniform(0.85, 1.0), 2)
-
-        # Consumption
-        if 7 <= hour <= 9 or 18 <= hour <= 22:
-            consumption = round(35 * 1.3 * random.uniform(0.9, 1.1), 2)
-        elif 6 <= hour <= 17:
-            consumption = round(35 * random.uniform(0.9, 1.1), 2)
-        else:
-            consumption = round(18 * random.uniform(0.85, 1.1), 2)
-
-        net = production - consumption
-        battery_level = max(5.0, min(100.0, battery_level + (net / battery_capacity) * 100 * 0.95))
-
-        grid_export = max(0.0, net - (battery_capacity * 0.05)) if net > 0 and battery_level >= 95 else 0.0
-        grid_import = max(0.0, -net - (battery_capacity * 0.05)) if net < 0 and battery_level <= 5 else 0.0
-        efficiency = round(min(100.0, (production / max(0.1, consumption)) * 100), 1) if consumption > 0 else 0.0
-
-        docs.append({
-            "timestamp": ts,
-            "production": production,
-            "consumption": consumption,
-            "batteryLevel": round(battery_level, 1),
-            "gridExport": round(grid_export, 3),
-            "gridImport": round(grid_import, 3),
-            "efficiency": efficiency,
-        })
+        cloud_factor = 1 - random.uniform(0, 60) * 0.006
+        production = round(capacity_kw * solar_factor * seasonal * cloud_factor * random.uniform(0.85, 1.0), 3)
+        docs.append({"timestamp": ts, "productionKw": production})
 
     if docs:
         col.insert_many(docs)

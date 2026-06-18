@@ -31,13 +31,6 @@ from app.services.inverter_service import (
     list_inverters,
     update_inverter,
 )
-from app.services.blackout_service import (
-    delete_blackout,
-    get_blackout,
-    list_blackouts,
-    save_blackout_schedule,
-    update_blackout_schedule,
-)
 from app.services.panel_service import (
     create_panel,
     delete_panel,
@@ -110,6 +103,14 @@ from app.services.lectura_service import (
     get_daily_summaries,
     save_reading,
     seed_historical_data,
+)
+from app.services.medicion_service import (
+    upload_batch as upload_appliance_batch,
+    delete_batch as delete_appliance_batch,
+    list_batches as list_appliance_batches,
+    get_daily_report,
+    get_appliance_readings,
+    preview_batch,
 )
 
 
@@ -187,6 +188,7 @@ class WeatherDataType:
     locationName: Optional[str]
     lastUpdated: Optional[str]
     description: Optional[str]
+    weatherCode: Optional[int]
     sourceError: Optional[str]
 
 
@@ -301,23 +303,12 @@ class SolarSnapshot:
 
 
 @strawberry.type
-class BlackoutImpactType:
-    intervalStart: str
-    intervalEnd: str
-    loadFactor: float
-    productionFactor: float
-    intensity: str
-    note: Optional[str]
-
-
-@strawberry.type
 class PredictionType:
     timestamp: str
     hour: int
     expectedProduction: float
     expectedConsumption: float
     confidence: float
-    blackoutImpact: Optional[BlackoutImpactType]
 
 
 @strawberry.type
@@ -330,25 +321,6 @@ class AlertType:
 
 
 @strawberry.type
-class BlackoutIntervalType:
-    start: str
-    end: str
-    durationMinutes: Optional[int]
-
-
-@strawberry.type
-class BlackoutType:
-    id_: str = strawberry.field(name="_id")
-    date: str
-    intervals: List[BlackoutIntervalType]
-    province: Optional[str]
-    municipality: Optional[str]
-    notes: Optional[str]
-    createdAt: Optional[str]
-    updatedAt: Optional[str]
-
-
-@strawberry.type
 class PredictionsPayload:
     predictions: List[PredictionType]
     alerts: List[AlertType]
@@ -358,7 +330,6 @@ class PredictionsPayload:
     weather: WeatherDataType
     timestamp: str
     config: SystemConfigType
-    blackouts: List[BlackoutType]
 
 
 @strawberry.type
@@ -486,24 +457,64 @@ class AuthPayloadType:
 class HistoricalReadingType:
     id_: str = strawberry.field(name="_id")
     timestamp: str
-    production: float
-    consumption: float
-    batteryLevel: float
-    gridExport: float
-    gridImport: float
-    efficiency: float
+    productionKw: float
 
 
 @strawberry.type
 class DailySummaryType:
     date: str
-    totalProduction: float
-    totalConsumption: float
-    avgBatteryLevel: float
-    maxProduction: float
-    maxConsumption: float
-    avgEfficiency: float
+    totalProductionKwh: float
+    maxProductionKw: float
     readingCount: int
+
+
+@strawberry.type
+class ApplianceBatchType:
+    batchId: str
+    applianceId: str
+    applianceName: str
+    filename: str
+    uploadedAt: str
+    startDate: str
+    endDate: str
+    samples: int
+    kwhDayEstimatedThis: float
+    kwhDayEstimatedOthers: float
+
+
+@strawberry.type
+class BatchPreviewType:
+    samples: int
+    startDate: Optional[str]
+    endDate: Optional[str]
+
+
+@strawberry.type
+class ApplianceReadingPointType:
+    timestamp: str
+    powerKw: float
+
+
+@strawberry.type
+class DailyReportApplianceType:
+    applianceId: str
+    name: str
+    mode: str  # "medido" | "estimado"
+    kwhDay: float
+    kwhDayEstimated: Optional[float]
+    errorPercent: Optional[float]
+    readingCount: int
+
+
+@strawberry.type
+class DailyReportType:
+    date: str
+    productionKwh: Optional[float]
+    measuredConsumptionKwh: float
+    estimatedConsumptionKwh: float
+    totalConsumptionKwh: float
+    hasRealData: bool
+    appliances: List[DailyReportApplianceType]
 
 
 @strawberry.type
@@ -680,6 +691,7 @@ def _map_weather(data: dict) -> WeatherDataType:
         locationName=data.get("locationName"),
         lastUpdated=data.get("lastUpdated"),
         description=data.get("description"),
+        weatherCode=data.get("weatherCode"),
         sourceError=data.get("sourceError"),
     )
 
@@ -796,19 +808,6 @@ def _map_system_config(config: dict) -> SystemConfigType:
     return SystemConfigType(location=location, solar=solar, battery=battery)
 
 
-def _map_blackout(data: dict) -> BlackoutType:
-    return BlackoutType(
-        id_=data["_id"],
-        date=data["date"],
-        intervals=[BlackoutIntervalType(**interval) for interval in data.get("intervals", [])],
-        province=data.get("province"),
-        municipality=data.get("municipality"),
-        notes=data.get("notes"),
-        createdAt=data.get("createdAt"),
-        updatedAt=data.get("updatedAt"),
-    )
-
-
 def _map_user(data: dict) -> UserType:
     # Rename _id to id_ for Strawberry field mapping
     data_copy = {**data}
@@ -854,7 +853,7 @@ def _scale_ml_predictions(
         target_capacity_kw = _get_real_capacity_kw_from_config(config)
 
     if not target_capacity_kw or target_capacity_kw <= 0:
-        return predictions
+        return [{**pred, "production_kw": 0.0} for pred in predictions]
 
     scale_factor = target_capacity_kw / reference_capacity_kw
     scaled_predictions: List[Dict[str, Any]] = []
@@ -951,15 +950,7 @@ class Query:
     async def predictions(self) -> PredictionsPayload:
         data = await get_predictions_bundle()
         return PredictionsPayload(
-            predictions=[
-                PredictionType(
-                    **prediction,
-                    blackoutImpact=BlackoutImpactType(**prediction["blackoutImpact"])
-                    if prediction.get("blackoutImpact")
-                    else None,
-                )
-                for prediction in data["predictions"]
-            ],
+            predictions=[PredictionType(**prediction) for prediction in data["predictions"]],
             alerts=[AlertType(**alert) for alert in data["alerts"]],
             recommendations=data["recommendations"],
             battery=_map_battery_status(data["battery"]),
@@ -967,7 +958,6 @@ class Query:
             weather=_map_weather(data["weather"]),
             timestamp=data["timestamp"],
             config=_map_system_config(data["config"]),
-            blackouts=[_map_blackout(item) for item in data["blackouts"]],
         )
 
     @strawberry.field
@@ -1070,16 +1060,6 @@ class Query:
     def inverter(self, id: str) -> Optional[InverterType]:
         inverter = get_inverter(id)
         return _map_inverter(inverter) if inverter else None
-
-    @strawberry.field
-    def blackouts(
-        self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        limit: Optional[int] = None,
-    ) -> List[BlackoutType]:
-        items = list_blackouts(start_date, end_date, limit)
-        return [_map_blackout(item) for item in items]
 
     @strawberry.field
     async def ml_predict(
@@ -1529,27 +1509,65 @@ class Query:
         end_date: Optional[str] = None,
         limit: int = 288,
     ) -> List[HistoricalReadingType]:
-        """Query historical solar readings with optional date range filter."""
+        """Query historical solar production readings with optional date range filter."""
         readings = get_readings(start_date, end_date, limit)
         return [
             HistoricalReadingType(
                 id_=r["_id"],
                 timestamp=r["timestamp"],
-                production=r["production"],
-                consumption=r["consumption"],
-                batteryLevel=r["batteryLevel"],
-                gridExport=r["gridExport"],
-                gridImport=r["gridImport"],
-                efficiency=r["efficiency"],
+                productionKw=r.get("productionKw", r.get("production", 0.0)),
             )
             for r in readings
         ]
 
     @strawberry.field
     def daily_summaries(self, days: int = 30) -> List[DailySummaryType]:
-        """Get daily aggregated summaries for the last N days."""
+        """Get daily aggregated production summaries for the last N days."""
         summaries = get_daily_summaries(days)
         return [DailySummaryType(**s) for s in summaries]
+
+    @strawberry.field
+    def appliance_batches(self, appliance_id: str) -> List[ApplianceBatchType]:
+        """List all uploaded measurement batches for an appliance."""
+        batches = list_appliance_batches(appliance_id)
+        return [ApplianceBatchType(**b) for b in batches]
+
+    @strawberry.field
+    def daily_report(self, date: str) -> DailyReportType:
+        """
+        Full daily energy report for a given date (YYYY-MM-DD).
+        Combines real Hioki measurements with estimated consumption from appliance configs.
+        """
+        report = get_daily_report(date)
+        appliances = [
+            DailyReportApplianceType(
+                applianceId=a["applianceId"],
+                name=a["name"],
+                mode=a["mode"],
+                kwhDay=a["kwhDay"],
+                kwhDayEstimated=a.get("kwhDayEstimated"),
+                errorPercent=a.get("errorPercent"),
+                readingCount=a.get("readingCount", 0),
+            )
+            for a in report["appliances"]
+        ]
+        return DailyReportType(
+            date=report["date"],
+            productionKwh=report.get("productionKwh"),
+            measuredConsumptionKwh=report["measuredConsumptionKwh"],
+            estimatedConsumptionKwh=report["estimatedConsumptionKwh"],
+            totalConsumptionKwh=report["totalConsumptionKwh"],
+            hasRealData=report["hasRealData"],
+            appliances=appliances,
+        )
+
+    @strawberry.field
+    def appliance_readings(
+        self, appliance_id: str, start_date: str, end_date: str
+    ) -> List[ApplianceReadingPointType]:
+        """Return minute-level Hioki readings for an appliance in a date range."""
+        points = get_appliance_readings(appliance_id, start_date, end_date)
+        return [ApplianceReadingPointType(**p) for p in points]
 
     @strawberry.field
     def weather_sources(self) -> List[WeatherSourceType]:
@@ -1649,21 +1667,6 @@ class ApplianceInput:
     selectedModeIndex: Optional[int] = None
     modes: Optional[List[ApplianceModeInput]] = None
     alwaysOn: Optional[bool] = True
-
-
-@strawberry.input
-class BlackoutIntervalInput:
-    start: str
-    end: str
-
-
-@strawberry.input
-class BlackoutInput:
-    date: str
-    intervals: List[BlackoutIntervalInput]
-    province: Optional[str] = None
-    municipality: Optional[str] = None
-    notes: Optional[str] = None
 
 
 @strawberry.input
@@ -1833,6 +1836,67 @@ class Mutation:
             raise ValueError("Electrodoméstico no encontrado.")
         return _map_appliance(appliance)
 
+    @strawberry.mutation(name="previewApplianceBatch")
+    def preview_appliance_batch_mutation(
+        self, info: strawberry.types.Info, file_content: str
+    ) -> BatchPreviewType:
+        """Parse a file and return detected date range + sample count without storing."""
+        require_admin(info.context)
+        result = preview_batch(file_content)
+        return BatchPreviewType(**result)
+
+    @strawberry.mutation(name="uploadApplianceBatch")
+    def upload_appliance_batch_mutation(
+        self,
+        info: strawberry.types.Info,
+        id: str,
+        file_content: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> ApplianceBatchType:
+        """
+        Upload a Hioki measurement file for an appliance. Accumulates readings
+        into mediciones_equipos (upsert) and rebuilds the 168-bin hourly profile.
+        Stores a snapshot of estimated kWh/day for error analysis.
+        """
+        require_admin(info.context)
+        # Compute estimation snapshot from current appliance configs
+        this_appl = get_appliance(id)
+        if not this_appl:
+            raise ValueError("Electrodoméstico no encontrado.")
+
+        all_appliances = list_appliances()
+        kwh_this = (
+            (this_appl.get("averagePowerW") or 0.0)
+            * (this_appl.get("activeHours") or 0.0)
+            / 1000.0
+        )
+        kwh_others = sum(
+            (a.get("averagePowerW") or 0.0) * (a.get("activeHours") or 0.0) / 1000.0
+            for a in all_appliances
+            if str(a.get("_id", "")) != id
+        )
+
+        batch = upload_appliance_batch(
+            appliance_id=id,
+            appliance_name=this_appl.get("name", ""),
+            file_content=file_content,
+            filename="archivo.xls",
+            start_date=start_date,
+            end_date=end_date,
+            kwh_day_estimated_this=kwh_this,
+            kwh_day_estimated_others=kwh_others,
+        )
+        return ApplianceBatchType(**batch)
+
+    @strawberry.mutation(name="deleteApplianceBatch")
+    def delete_appliance_batch_mutation(
+        self, info: strawberry.types.Info, batch_id: str
+    ) -> bool:
+        """Delete a measurement batch and rebuild the appliance's hourly profile."""
+        require_admin(info.context)
+        return delete_appliance_batch(batch_id)
+
     @strawberry.mutation(name="createInverter")
     def create_inverter_mutation(self, info: strawberry.types.Info, input: InverterInput) -> InverterType:
         require_admin(info.context)
@@ -1851,37 +1915,6 @@ class Mutation:
     def delete_inverter_mutation(self, info: strawberry.types.Info, id: str) -> bool:
         require_admin(info.context)
         return delete_inverter(id)
-
-    @strawberry.mutation(name="createBlackout")
-    def create_blackout_mutation(self, info: strawberry.types.Info, input: BlackoutInput) -> BlackoutType:
-        require_admin(info.context)
-        payload = {
-            "date": input.date,
-            "intervals": [interval.__dict__ for interval in input.intervals],
-            "province": input.province,
-            "municipality": input.municipality,
-            "notes": input.notes,
-        }
-        blackout = save_blackout_schedule(payload)
-        return _map_blackout(blackout)
-
-    @strawberry.mutation(name="updateBlackout")
-    def update_blackout_mutation(self, info: strawberry.types.Info, id: str, input: BlackoutInput) -> BlackoutType:
-        require_admin(info.context)
-        payload = {
-            "date": input.date,
-            "intervals": [interval.__dict__ for interval in input.intervals],
-            "province": input.province,
-            "municipality": input.municipality,
-            "notes": input.notes,
-        }
-        blackout = update_blackout_schedule(id, payload)
-        return _map_blackout(blackout)
-
-    @strawberry.mutation(name="deleteBlackout")
-    def delete_blackout_mutation(self, info: strawberry.types.Info, id: str) -> bool:
-        require_admin(info.context)
-        return delete_blackout(id)
 
     @strawberry.mutation(name="registerUser")
     def register_user_mutation(self, info: strawberry.types.Info, input: RegisterInput) -> AuthPayloadType:
@@ -2045,7 +2078,7 @@ class Mutation:
     def reset_system_data_mutation(self, info: strawberry.types.Info) -> bool:
         """
         Borra toda la configuración del sistema (paneles, baterías, inversores,
-        electrodomésticos, apagones, ubicación y perfil de consumo) para permitir
+        electrodomésticos, ubicación y perfil de consumo) para permitir
         volver a ejecutar el asistente de configuración. Solo administradores.
         """
         require_admin(info.context)
@@ -2054,7 +2087,6 @@ class Mutation:
         db["baterias"].delete_many({})
         db["inversores"].delete_many({})
         db["electrodomesticos"].delete_many({})
-        db["apagones"].delete_many({})
         db["ubicacion_config"].delete_many({})
         db["consumption_profiles"].delete_many({})
         db["shadow_profile"].delete_many({})

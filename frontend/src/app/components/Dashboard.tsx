@@ -21,7 +21,6 @@ import {
   Alert,
   SystemConfig,
   User,
-  BlackoutSchedule,
   SolarPanelConfig,
   BatteryConfig,
   InverterConfig,
@@ -96,6 +95,7 @@ const DASHBOARD_QUERY = `
         locationName
         lastUpdated
         description
+        weatherCode
         forecast {
           date
           dayOfWeek
@@ -176,14 +176,6 @@ const DASHBOARD_QUERY = `
         expectedProduction
         expectedConsumption
         confidence
-        blackoutImpact {
-          intervalStart
-          intervalEnd
-          loadFactor
-          productionFactor
-          intensity
-          note
-        }
       }
       alerts {
         id
@@ -224,6 +216,7 @@ const DASHBOARD_QUERY = `
         locationName
         lastUpdated
         description
+        weatherCode
         forecast {
           date
           dayOfWeek
@@ -255,20 +248,6 @@ const DASHBOARD_QUERY = `
           dischargeRateKw
           efficiencyPercent
         }
-      }
-      blackouts {
-        _id
-        date
-        intervals {
-          start
-          end
-          durationMinutes
-        }
-        province
-        municipality
-        notes
-        createdAt
-        updatedAt
       }
     }
     panels {
@@ -361,7 +340,7 @@ type DashboardQueryResult = {
     weather: WeatherData;
     timestamp: string;
     config: SystemConfig;
-    blackouts: BlackoutSchedule[];
+
   };
   panels: SolarPanelConfig[];
   batteries: BatteryConfig[];
@@ -539,7 +518,6 @@ const DEMO_DATA: DashboardQueryResult = {
     },
     timestamp: new Date().toISOString(),
     config: DEFAULT_SYSTEM_CONFIG,
-    blackouts: [],
   },
   panels: [],
   batteries: [],
@@ -652,7 +630,6 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     timeline: SolarData[];
     weather?: WeatherData;
     config: SystemConfig;
-    blackouts?: BlackoutSchedule[];
   } | null>(null);
 
   const [mlPredictions, setMlPredictions] = useState<SolarData[]>([]);
@@ -731,6 +708,19 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     }
     return solarData?.current.production ?? 0;
   }, [mlPredictions, solarData]);
+
+  // Consumo "ahora" desde la misma fuente que el gráfico (electrodomésticos/ML).
+  // Si no hay electrodomésticos configurados el valor es 0, igual que el gráfico.
+  const currentConsumption = useMemo(() => {
+    if (mlPredictions.length > 0) {
+      const nowHour = new Date().getHours();
+      const match = mlPredictions.find(
+        (p) => new Date(p.timestamp).getHours() === nowHour
+      );
+      return match ? match.consumption : 0;
+    }
+    return 0;
+  }, [mlPredictions]);
 
   // Fetch ML predictions for a specific day (7am-10pm)
   const fetchMLPredictionsForDay = useCallback(async (dayOffset: number) => {
@@ -1079,8 +1069,8 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
               <div className="lg:col-span-1 lg:pr-4 flex items-center justify-center">
                 <SystemDiagram
                   solarKw={currentSolarProduction}
-                  batteryKwh={solarData.config.battery.capacityKwh}
-                  consumptionKw={solarData.current.consumption}
+                  batteryKwh={batteryConfigs.reduce((sum, b) => sum + (b.capacityKwh ?? 0) * (b.quantity ?? 1), 0)}
+                  consumptionKw={currentConsumption}
                   isAdmin={user.role === 'admin'}
                 />
               </div>
@@ -1119,7 +1109,6 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                 weather={weatherData}
                 batteryProjection={predictionsData.battery}
                 config={solarData.config}
-                blackouts={predictionsData.blackouts}
                 consumptionPredictions={consumptionPredictions}
                 solarModelR2={solarModelR2}
               />
