@@ -14,9 +14,31 @@ def _round(value: float) -> float:
     return round(value, 2)
 
 
+_ZERO_SOLAR: Dict[str, Any] = {
+    "capacityKw": 0.0,
+    "panelRatedKw": None,
+    "panelCount": 0,
+    "strings": 0,
+    "panelEfficiencyPercent": None,
+    "panelAreaM2": None,
+    "spec": None,
+}
+
+_ZERO_BATTERY: Dict[str, Any] = {
+    "capacityKwh": 0.0,
+    "moduleCapacityKwh": None,
+    "moduleCount": 0,
+    "maxDepthOfDischargePercent": None,
+    "chargeRateKw": None,
+    "dischargeRateKw": None,
+    "efficiencyPercent": None,
+    "spec": None,
+}
+
+
 def _aggregate_solar(panels: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not panels:
-        return DEFAULT_SYSTEM_CONFIG["solar"]
+        return _ZERO_SOLAR
 
     total_capacity = 0.0
     total_count = 0
@@ -42,7 +64,7 @@ def _aggregate_solar(panels: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _aggregate_battery(batteries: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not batteries:
-        return DEFAULT_SYSTEM_CONFIG["battery"]
+        return _ZERO_BATTERY
 
     total_capacity = 0.0
     total_modules = 0
@@ -71,7 +93,11 @@ def get_system_config() -> Dict[str, Any]:
         panels = list_panels()
         batteries = list_batteries()
     except Exception:  # pragma: no cover - DB failure fallback
-        return DEFAULT_SYSTEM_CONFIG
+        return {
+            "location": DEFAULT_SYSTEM_CONFIG["location"],
+            "solar": _ZERO_SOLAR,
+            "battery": _ZERO_BATTERY,
+        }
 
     return {
         "location": get_location_config(),

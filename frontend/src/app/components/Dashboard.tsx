@@ -709,6 +709,19 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     return solarData?.current.production ?? 0;
   }, [mlPredictions, solarData]);
 
+  // Consumo "ahora" desde la misma fuente que el gráfico (electrodomésticos/ML).
+  // Si no hay electrodomésticos configurados el valor es 0, igual que el gráfico.
+  const currentConsumption = useMemo(() => {
+    if (mlPredictions.length > 0) {
+      const nowHour = new Date().getHours();
+      const match = mlPredictions.find(
+        (p) => new Date(p.timestamp).getHours() === nowHour
+      );
+      return match ? match.consumption : 0;
+    }
+    return 0;
+  }, [mlPredictions]);
+
   // Fetch ML predictions for a specific day (7am-10pm)
   const fetchMLPredictionsForDay = useCallback(async (dayOffset: number) => {
     setMlLoading(true);
@@ -1056,8 +1069,8 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
               <div className="lg:col-span-1 lg:pr-4 flex items-center justify-center">
                 <SystemDiagram
                   solarKw={currentSolarProduction}
-                  batteryKwh={solarData.config.battery.capacityKwh}
-                  consumptionKw={solarData.current.consumption}
+                  batteryKwh={batteryConfigs.reduce((sum, b) => sum + (b.capacityKwh ?? 0) * (b.quantity ?? 1), 0)}
+                  consumptionKw={currentConsumption}
                   isAdmin={user.role === 'admin'}
                 />
               </div>
