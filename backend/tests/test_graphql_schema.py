@@ -850,3 +850,672 @@ class TestGraphQLFuentesClima:
             "useMock": True,
         })
         assert _has_errors(r) or _data_is_null(r, "testWeatherSource")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Gestión de usuarios — users query, deleteUser, changePassword
+# ─────────────────────────────────────────────────────────────────────────────
+
+QUERY_USERS = """
+query {
+  users {
+    _id
+    email
+    role
+    createdAt
+  }
+}
+"""
+
+DELETE_USER = """
+mutation($id: String!) {
+  deleteUser(id: $id)
+}
+"""
+
+CHANGE_PASSWORD = """
+mutation($input: ChangePasswordInput!) {
+  changePassword(input: $input)
+}
+"""
+
+LOGIN = """
+mutation($input: LoginInput!) {
+  loginUser(input: $input) {
+    user { email role }
+    token
+  }
+}
+"""
+
+
+def _create_user_via_invitation(client: GQLClient, email: str, role: str = "user"):
+    """Registra un usuario usando generateInvitationCode + registerUser."""
+    # Generar código
+    r_code = client.execute("""
+        mutation($role: String!, $createdBy: String!) {
+          generateInvitationCode(role: $role, createdBy: $createdBy) {
+            code
+          }
+        }
+    """, {"role": role, "createdBy": "admin@test.cu"})
+    code = r_code["data"]["generateInvitationCode"]["code"]
+    # Registrar usuario
+    r_reg = client.execute("""
+        mutation($input: RegisterInput!) {
+          registerUser(input: $input) {
+            user { _id email role }
+            token
+          }
+        }
+    """, {"input": {"email": email, "password": "Segura123!", "invitationCode": code}})
+    return r_reg["data"]["registerUser"]["user"]
+
+
+class TestGraphQLUsuarios:
+
+    def test_admin_puede_listar_usuarios(self, admin, db):
+        _create_user_via_invitation(admin, "listed@test.cu")
+        r = admin.execute(QUERY_USERS)
+        assert not _has_errors(r)
+        assert len(r["data"]["users"]) >= 1
+
+    def test_user_no_puede_listar_usuarios(self, user):
+        r = user.execute(QUERY_USERS)
+        assert _has_errors(r) or _data_is_null(r, "users")
+
+    def test_anonimo_no_puede_listar_usuarios(self, anon):
+        r = anon.execute(QUERY_USERS)
+        assert _has_errors(r) or _data_is_null(r, "users")
+
+    def test_admin_puede_eliminar_usuario(self, admin, db):
+        target = _create_user_via_invitation(admin, "todelete@test.cu")
+        r = admin.execute(DELETE_USER, {"id": target["_id"]})
+        assert not _has_errors(r)
+        assert r["data"]["deleteUser"] is True
+
+    def test_eliminar_quita_de_lista(self, admin, db):
+        target = _create_user_via_invitation(admin, "gone@test.cu")
+        admin.execute(DELETE_USER, {"id": target["_id"]})
+        r = admin.execute(QUERY_USERS)
+        ids = [u["_id"] for u in r["data"]["users"]]
+        assert target["_id"] not in ids
+
+    def test_user_no_puede_eliminar_usuario(self, user, db):
+        # Necesitamos un admin para crear el target
+        from app.services.invitation_service import create_invitation_code
+        from app.services.user_service import register_user
+        code = create_invitation_code("user", "sys")["code"]
+        target = register_user({"email": "target2@test.cu", "password": "Segura123!", "invitationCode": code})
+        r = user.execute(DELETE_USER, {"id": target["_id"]})
+        assert _has_errors(r) or r["data"].get("deleteUser") is None
+
+    def test_admin_puede_cambiar_su_password(self, db):
+        # Crear admin real con contraseña conocida
+        from app.services.invitation_service import create_invitation_code
+        from app.services.user_service import register_user
+        code = create_invitation_code("admin", "sys")["code"]
+        register_user({"email": "myadmin@test.cu", "password": "Antigua123!", "invitationCode": code})
+        admin_ctx = GQLClient({"current_user": {"sub": "myadmin@test.cu", "role": "admin", "jti": "cp-jti"}, "request": None})
+        r = admin_ctx.execute(CHANGE_PASSWORD, {
+            "input": {"currentPassword": "Antigua123!", "newPassword": "NuevaSegura456!"}
+        })
+        assert not _has_errors(r)
+        assert r["data"]["changePassword"] is True
+
+    def test_cambio_password_incorrecta_da_error(self, db):
+        from app.services.invitation_service import create_invitation_code
+        from app.services.user_service import register_user
+        code = create_invitation_code("user", "sys")["code"]
+        register_user({"email": "badpass@test.cu", "password": "Antigua123!", "invitationCode": code})
+        user_ctx = GQLClient({"current_user": {"sub": "badpass@test.cu", "role": "user", "jti": "bp-jti"}, "request": None})
+        r = user_ctx.execute(CHANGE_PASSWORD, {
+            "input": {"currentPassword": "Incorrecta!", "newPassword": "NuevaSegura456!"}
+        })
+        assert _has_errors(r)
+
+    def test_estructura_usuario_en_lista(self, admin, db):
+        _create_user_via_invitation(admin, "struct@test.cu")
+        r = admin.execute(QUERY_USERS)
+        user_item = r["data"]["users"][0]
+        for field in ["_id", "email", "role"]:
+            assert field in user_item
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sesiones activas — activeSessions query + revokeSession mutation
+# ─────────────────────────────────────────────────────────────────────────────
+
+QUERY_ACTIVE_SESSIONS = """
+query {
+  activeSessions {
+    _id
+    email
+    deviceType
+    createdAt
+    expiresAt
+  }
+}
+"""
+
+REVOKE_SESSION = """
+mutation($id: String!) {
+  revokeSession(id: $id)
+}
+"""
+
+
+class TestGraphQLSesiones:
+
+    def _seed_session(self, email="op@test.cu"):
+        from app.services.session_service import create_session
+        from datetime import datetime, timedelta
+        import uuid
+        jti = uuid.uuid4().hex
+        expires = datetime.utcnow() + timedelta(days=7)
+        create_session(email, "127.0.0.1", "Mozilla/5.0", jti, expires)
+        return jti
+
+    def test_admin_puede_ver_sesiones_activas(self, admin, db):
+        self._seed_session()
+        r = admin.execute(QUERY_ACTIVE_SESSIONS)
+        assert not _has_errors(r)
+        assert isinstance(r["data"]["activeSessions"], list)
+
+    def test_user_no_puede_ver_sesiones(self, user):
+        r = user.execute(QUERY_ACTIVE_SESSIONS)
+        assert _has_errors(r) or _data_is_null(r, "activeSessions")
+
+    def test_sesion_creada_aparece_en_lista(self, admin, db):
+        self._seed_session(email="sesion@test.cu")
+        r = admin.execute(QUERY_ACTIVE_SESSIONS)
+        emails = [s["email"] for s in r["data"]["activeSessions"]]
+        assert "sesion@test.cu" in emails
+
+    def test_estructura_sesion(self, admin, db):
+        self._seed_session()
+        r = admin.execute(QUERY_ACTIVE_SESSIONS)
+        if r["data"]["activeSessions"]:
+            s = r["data"]["activeSessions"][0]
+            for field in ["_id", "email", "deviceType"]:
+                assert field in s
+
+    def test_admin_puede_revocar_sesion(self, admin, db):
+        self._seed_session("rev@test.cu")
+        r_list = admin.execute(QUERY_ACTIVE_SESSIONS)
+        sessions = [s for s in r_list["data"]["activeSessions"] if s["email"] == "rev@test.cu"]
+        assert sessions
+        session_id = sessions[0]["_id"]
+        r_rev = admin.execute(REVOKE_SESSION, {"id": session_id})
+        assert not _has_errors(r_rev)
+        assert r_rev["data"]["revokeSession"] is True
+
+    def test_revocar_quita_sesion_de_lista(self, admin, db):
+        self._seed_session("toremove@test.cu")
+        r_list = admin.execute(QUERY_ACTIVE_SESSIONS)
+        sessions = [s for s in r_list["data"]["activeSessions"] if s["email"] == "toremove@test.cu"]
+        session_id = sessions[0]["_id"]
+        admin.execute(REVOKE_SESSION, {"id": session_id})
+        r_after = admin.execute(QUERY_ACTIVE_SESSIONS)
+        remaining = [s for s in r_after["data"]["activeSessions"] if s["email"] == "toremove@test.cu"]
+        assert remaining == []
+
+    def test_user_no_puede_revocar_sesion(self, user, db):
+        self._seed_session()
+        r_list = GQLClient({"current_user": {"sub": "x", "role": "admin", "jti": "x"}, "request": None}).execute(QUERY_ACTIVE_SESSIONS)
+        if r_list["data"].get("activeSessions"):
+            sid = r_list["data"]["activeSessions"][0]["_id"]
+            r = user.execute(REVOKE_SESSION, {"id": sid})
+            assert _has_errors(r)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Perfil de sombras — saveShadowProfile mutation + shadowProfile query
+# ─────────────────────────────────────────────────────────────────────────────
+
+SAVE_SHADOW_PROFILE = """
+mutation($slots: [ShadowSlotInput!]!) {
+  saveShadowProfile(slots: $slots) {
+    avgShadow
+    avgProd
+    updatedAt
+    slots {
+      hour
+      shadowPct
+    }
+  }
+}
+"""
+
+QUERY_SHADOW_PROFILE = """
+query {
+  shadowProfile {
+    avgShadow
+    avgProd
+    slots {
+      hour
+      shadowPct
+    }
+  }
+}
+"""
+
+_SHADOW_SLOTS = [
+    {"hour": h, "shadowPct": float(h * 3 % 100), "prodOverride": None}
+    for h in range(6, 20)
+]
+
+
+class TestGraphQLShadowProfile:
+
+    def test_sin_perfil_query_retorna_null(self, admin):
+        r = admin.execute(QUERY_SHADOW_PROFILE)
+        assert not _has_errors(r)
+        assert r["data"]["shadowProfile"] is None
+
+    def test_admin_puede_guardar_perfil(self, admin):
+        r = admin.execute(SAVE_SHADOW_PROFILE, {"slots": _SHADOW_SLOTS})
+        assert not _has_errors(r)
+        assert r["data"]["saveShadowProfile"]["avgShadow"] is not None
+
+    def test_user_no_puede_guardar_perfil(self, user):
+        r = user.execute(SAVE_SHADOW_PROFILE, {"slots": _SHADOW_SLOTS})
+        assert _has_errors(r) or _data_is_null(r, "saveShadowProfile")
+
+    def test_guardar_y_recuperar_perfil(self, admin):
+        admin.execute(SAVE_SHADOW_PROFILE, {"slots": _SHADOW_SLOTS})
+        r = admin.execute(QUERY_SHADOW_PROFILE)
+        assert not _has_errors(r)
+        profile = r["data"]["shadowProfile"]
+        assert profile is not None
+        assert len(profile["slots"]) == len(_SHADOW_SLOTS)
+
+    def test_perfil_tiene_avg_shadow(self, admin):
+        admin.execute(SAVE_SHADOW_PROFILE, {"slots": _SHADOW_SLOTS})
+        r = admin.execute(QUERY_SHADOW_PROFILE)
+        assert isinstance(r["data"]["shadowProfile"]["avgShadow"], float)
+
+    def test_perfil_tiene_avg_prod(self, admin):
+        admin.execute(SAVE_SHADOW_PROFILE, {"slots": _SHADOW_SLOTS})
+        r = admin.execute(QUERY_SHADOW_PROFILE)
+        assert isinstance(r["data"]["shadowProfile"]["avgProd"], float)
+
+    def test_perfil_slots_tienen_hora_y_sombra(self, admin):
+        admin.execute(SAVE_SHADOW_PROFILE, {"slots": _SHADOW_SLOTS})
+        r = admin.execute(QUERY_SHADOW_PROFILE)
+        slot = r["data"]["shadowProfile"]["slots"][0]
+        assert "hour" in slot and "shadowPct" in slot
+
+    def test_guardar_sobreescribe_perfil_anterior(self, admin):
+        admin.execute(SAVE_SHADOW_PROFILE, {"slots": _SHADOW_SLOTS})
+        new_slots = [{"hour": 12, "shadowPct": 99.0, "prodOverride": None}]
+        admin.execute(SAVE_SHADOW_PROFILE, {"slots": new_slots})
+        r = admin.execute(QUERY_SHADOW_PROFILE)
+        assert len(r["data"]["shadowProfile"]["slots"]) == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Perfil de consumo — saveConsumptionProfile + consumptionProfile + predicciones
+# ─────────────────────────────────────────────────────────────────────────────
+
+SAVE_CONSUMPTION_PROFILE = """
+mutation($weekday: [Float!]!, $weekend: [Float!]!, $name: String) {
+  saveConsumptionProfile(weekday: $weekday, weekend: $weekend, name: $name) {
+    _id
+    name
+    isActive
+    weekday
+    weekend
+  }
+}
+"""
+
+QUERY_CONSUMPTION_PROFILE = """
+query {
+  consumptionProfile {
+    name
+    isActive
+    weekday
+    weekend
+  }
+}
+"""
+
+PREDICT_CONSUMPTION_PROFILE = """
+query($date: String!, $hours: [Int!]) {
+  predictConsumptionProfile(date: $date, hours: $hours) {
+    hour
+    consumptionKw
+    confidence
+    isWeekend
+  }
+}
+"""
+
+PREDICT_CONSUMPTION_RANGE = """
+query($startDate: String!, $endDate: String!) {
+  predictConsumptionProfileRange(startDate: $startDate, endDate: $endDate) {
+    hour
+    consumptionKw
+    isWeekend
+  }
+}
+"""
+
+PREDICT_CONSUMPTION_NEXT_HOURS = """
+query($hours: Int) {
+  predictConsumptionProfileNextHours(hours: $hours) {
+    hour
+    consumptionKw
+    confidence
+  }
+}
+"""
+
+_FLAT_WEEKDAY = [5.0] * 24
+_FLAT_WEEKEND = [4.0] * 24
+
+
+class TestGraphQLPerfilConsumo:
+
+    def test_query_perfil_sin_datos_retorna_default(self, admin):
+        r = admin.execute(QUERY_CONSUMPTION_PROFILE)
+        assert not _has_errors(r)
+        profile = r["data"]["consumptionProfile"]
+        assert profile is not None
+        assert len(profile["weekday"]) == 24
+
+    def test_admin_puede_guardar_perfil(self, admin):
+        r = admin.execute(SAVE_CONSUMPTION_PROFILE, {
+            "weekday": _FLAT_WEEKDAY, "weekend": _FLAT_WEEKEND, "name": "Perfil CUJAE"
+        })
+        assert not _has_errors(r)
+        assert r["data"]["saveConsumptionProfile"]["name"] == "Perfil CUJAE"
+
+    def test_user_no_puede_guardar_perfil(self, user):
+        r = user.execute(SAVE_CONSUMPTION_PROFILE, {
+            "weekday": _FLAT_WEEKDAY, "weekend": _FLAT_WEEKEND
+        })
+        assert _has_errors(r) or _data_is_null(r, "saveConsumptionProfile")
+
+    def test_guardar_y_recuperar_perfil(self, admin):
+        admin.execute(SAVE_CONSUMPTION_PROFILE, {
+            "weekday": _FLAT_WEEKDAY, "weekend": _FLAT_WEEKEND, "name": "CUJAE"
+        })
+        r = admin.execute(QUERY_CONSUMPTION_PROFILE)
+        assert r["data"]["consumptionProfile"]["name"] == "CUJAE"
+
+    def test_perfil_guardado_esta_activo(self, admin):
+        admin.execute(SAVE_CONSUMPTION_PROFILE, {
+            "weekday": _FLAT_WEEKDAY, "weekend": _FLAT_WEEKEND
+        })
+        r = admin.execute(QUERY_CONSUMPTION_PROFILE)
+        assert r["data"]["consumptionProfile"]["isActive"] is True
+
+    def test_perfil_weekday_tiene_24_valores(self, admin):
+        admin.execute(SAVE_CONSUMPTION_PROFILE, {
+            "weekday": _FLAT_WEEKDAY, "weekend": _FLAT_WEEKEND
+        })
+        r = admin.execute(QUERY_CONSUMPTION_PROFILE)
+        assert len(r["data"]["consumptionProfile"]["weekday"]) == 24
+
+    def test_predict_para_fecha_devuelve_24(self, admin):
+        r = admin.execute(PREDICT_CONSUMPTION_PROFILE, {"date": "2024-06-17"})
+        assert not _has_errors(r)
+        assert len(r["data"]["predictConsumptionProfile"]) == 24
+
+    def test_predict_horas_especificas(self, admin):
+        r = admin.execute(PREDICT_CONSUMPTION_PROFILE, {
+            "date": "2024-06-17", "hours": [8, 12, 18]
+        })
+        assert len(r["data"]["predictConsumptionProfile"]) == 3
+
+    def test_predict_estructura_prediccion(self, admin):
+        r = admin.execute(PREDICT_CONSUMPTION_PROFILE, {
+            "date": "2024-06-17", "hours": [10]
+        })
+        pred = r["data"]["predictConsumptionProfile"][0]
+        for field in ["hour", "consumptionKw", "confidence", "isWeekend"]:
+            assert field in pred
+
+    def test_predict_lunes_no_es_finde(self, admin):
+        r = admin.execute(PREDICT_CONSUMPTION_PROFILE, {
+            "date": "2024-06-17", "hours": [10]
+        })
+        assert r["data"]["predictConsumptionProfile"][0]["isWeekend"] is False
+
+    def test_predict_sabado_es_finde(self, admin):
+        r = admin.execute(PREDICT_CONSUMPTION_PROFILE, {
+            "date": "2024-06-15", "hours": [10]
+        })
+        assert r["data"]["predictConsumptionProfile"][0]["isWeekend"] is True
+
+    def test_predict_range_un_dia_devuelve_24(self, admin):
+        r = admin.execute(PREDICT_CONSUMPTION_RANGE, {
+            "startDate": "2024-06-17", "endDate": "2024-06-17"
+        })
+        assert not _has_errors(r)
+        assert len(r["data"]["predictConsumptionProfileRange"]) == 24
+
+    def test_predict_range_dos_dias_devuelve_48(self, admin):
+        r = admin.execute(PREDICT_CONSUMPTION_RANGE, {
+            "startDate": "2024-06-17", "endDate": "2024-06-18"
+        })
+        assert len(r["data"]["predictConsumptionProfileRange"]) == 48
+
+    def test_predict_next_hours_devuelve_24_por_defecto(self, admin):
+        r = admin.execute(PREDICT_CONSUMPTION_NEXT_HOURS, {})
+        assert not _has_errors(r)
+        assert len(r["data"]["predictConsumptionProfileNextHours"]) == 24
+
+    def test_predict_next_hours_parametro_n(self, admin):
+        r = admin.execute(PREDICT_CONSUMPTION_NEXT_HOURS, {"hours": 6})
+        assert len(r["data"]["predictConsumptionProfileNextHours"]) == 6
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Medidas de electrodomésticos — upload, clear, appliancesConsumptionForecast
+# ─────────────────────────────────────────────────────────────────────────────
+
+UPLOAD_MEASUREMENT = """
+mutation($id: String!, $fileContent: String!) {
+  uploadApplianceMeasurement(id: $id, fileContent: $fileContent) {
+    _id
+    name
+  }
+}
+"""
+
+CLEAR_MEASUREMENT = """
+mutation($id: String!) {
+  clearApplianceMeasurement(id: $id) {
+    _id
+    name
+  }
+}
+"""
+
+APPLIANCES_FORECAST = """
+query($hours: Int, $start: String) {
+  appliancesConsumptionForecast(hours: $hours, start: $start) {
+    totalConsumptionKw
+    appliancesAlwaysOn
+    appliancesWithProfile
+    points {
+      datetime
+      consumptionKw
+    }
+  }
+}
+"""
+
+_CSV_MEDIDA = """Date,Time,P(SUM)
+2024-06-17,08:00:00,1.5
+2024-06-17,09:00:00,2.3
+2024-06-17,10:00:00,1.8
+2024-06-17,11:00:00,2.0
+2024-06-18,08:00:00,1.7
+"""
+
+_APPLIANCE_INPUT = {
+    "name": "Aire Acondicionado Test",
+    "averagePowerW": 1500.0,
+    "maxPowerW": 2000.0,
+    "quantity": 1,
+}
+
+
+class TestGraphQLMedidasElectrodomestico:
+
+    def _create_appliance(self, admin):
+        from app.services.appliance_service import create_appliance
+        ap = create_appliance(_APPLIANCE_INPUT)
+        return ap["_id"]
+
+    def test_admin_puede_subir_medicion(self, admin, db):
+        ap_id = self._create_appliance(admin)
+        r = admin.execute(UPLOAD_MEASUREMENT, {"id": ap_id, "fileContent": _CSV_MEDIDA})
+        assert not _has_errors(r)
+        assert r["data"]["uploadApplianceMeasurement"]["_id"] == ap_id
+
+    def test_user_no_puede_subir_medicion(self, user, db):
+        from app.services.appliance_service import create_appliance
+        ap = create_appliance(_APPLIANCE_INPUT)
+        r = user.execute(UPLOAD_MEASUREMENT, {"id": ap["_id"], "fileContent": _CSV_MEDIDA})
+        assert _has_errors(r) or _data_is_null(r, "uploadApplianceMeasurement")
+
+    def test_admin_puede_limpiar_medicion(self, admin, db):
+        ap_id = self._create_appliance(admin)
+        admin.execute(UPLOAD_MEASUREMENT, {"id": ap_id, "fileContent": _CSV_MEDIDA})
+        r = admin.execute(CLEAR_MEASUREMENT, {"id": ap_id})
+        assert not _has_errors(r)
+        assert r["data"]["clearApplianceMeasurement"]["_id"] == ap_id
+
+    def test_forecast_sin_electrodomesticos_devuelve_0(self, admin, db):
+        r = admin.execute(APPLIANCES_FORECAST, {"hours": 4})
+        assert not _has_errors(r)
+        assert r["data"]["appliancesConsumptionForecast"]["appliancesAlwaysOn"] == 0
+
+    def test_forecast_con_electrodomestico_devuelve_puntos(self, admin, db):
+        self._create_appliance(admin)
+        r = admin.execute(APPLIANCES_FORECAST, {"hours": 6})
+        assert not _has_errors(r)
+        assert len(r["data"]["appliancesConsumptionForecast"]["points"]) == 6
+
+    def test_forecast_puntos_tienen_datetime_y_kw(self, admin, db):
+        self._create_appliance(admin)
+        r = admin.execute(APPLIANCES_FORECAST, {"hours": 3})
+        point = r["data"]["appliancesConsumptionForecast"]["points"][0]
+        assert "datetime" in point
+        assert "consumptionKw" in point
+
+    def test_forecast_consumo_total_no_negativo(self, admin, db):
+        self._create_appliance(admin)
+        r = admin.execute(APPLIANCES_FORECAST, {"hours": 8})
+        assert r["data"]["appliancesConsumptionForecast"]["totalConsumptionKw"] >= 0
+
+    def test_forecast_con_perfil_subido(self, admin, db):
+        ap_id = self._create_appliance(admin)
+        admin.execute(UPLOAD_MEASUREMENT, {"id": ap_id, "fileContent": _CSV_MEDIDA})
+        r = admin.execute(APPLIANCES_FORECAST, {"hours": 4})
+        assert not _has_errors(r)
+        assert r["data"]["appliancesConsumptionForecast"]["appliancesWithProfile"] >= 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Historial — historicalReadings + dailySummaries + seedHistoricalData
+# ─────────────────────────────────────────────────────────────────────────────
+
+QUERY_HISTORICAL = """
+query($limit: Int) {
+  historicalReadings(limit: $limit) {
+    _id
+    timestamp
+    production
+    consumption
+    batteryLevel
+  }
+}
+"""
+
+QUERY_DAILY_SUMMARIES = """
+query($days: Int) {
+  dailySummaries(days: $days) {
+    date
+    totalProduction
+    totalConsumption
+    avgBatteryLevel
+    readingCount
+  }
+}
+"""
+
+SEED_HISTORICAL = """
+mutation($days: Int) {
+  seedHistoricalData(days: $days)
+}
+"""
+
+
+class TestGraphQLHistorial:
+
+    def test_historico_vacio_retorna_lista_vacia(self, admin):
+        r = admin.execute(QUERY_HISTORICAL, {})
+        assert not _has_errors(r)
+        assert r["data"]["historicalReadings"] == []
+
+    def test_seed_inserta_datos(self, admin):
+        r = admin.execute(SEED_HISTORICAL, {"days": 2})
+        assert not _has_errors(r)
+        assert r["data"]["seedHistoricalData"] == 2 * 24
+
+    def test_historico_con_datos_retorna_lecturas(self, admin):
+        admin.execute(SEED_HISTORICAL, {"days": 2})
+        r = admin.execute(QUERY_HISTORICAL, {"limit": 10})
+        assert not _has_errors(r)
+        assert len(r["data"]["historicalReadings"]) == 10
+
+    def test_historico_estructura_lectura(self, admin):
+        admin.execute(SEED_HISTORICAL, {"days": 1})
+        r = admin.execute(QUERY_HISTORICAL, {"limit": 1})
+        reading = r["data"]["historicalReadings"][0]
+        for field in ["_id", "timestamp", "production", "consumption", "batteryLevel"]:
+            assert field in reading
+
+    def test_historico_produccion_no_negativa(self, admin):
+        admin.execute(SEED_HISTORICAL, {"days": 2})
+        r = admin.execute(QUERY_HISTORICAL, {"limit": 48})
+        for reading in r["data"]["historicalReadings"]:
+            assert reading["production"] >= 0
+
+    def test_resumenes_vacio_retorna_lista_vacia(self, admin):
+        r = admin.execute(QUERY_DAILY_SUMMARIES, {"days": 7})
+        assert not _has_errors(r)
+        assert r["data"]["dailySummaries"] == []
+
+    def test_resumenes_con_datos_retorna_entradas(self, admin):
+        admin.execute(SEED_HISTORICAL, {"days": 3})
+        r = admin.execute(QUERY_DAILY_SUMMARIES, {"days": 5})
+        assert not _has_errors(r)
+        assert len(r["data"]["dailySummaries"]) > 0
+
+    def test_resumenes_estructura(self, admin):
+        admin.execute(SEED_HISTORICAL, {"days": 2})
+        r = admin.execute(QUERY_DAILY_SUMMARIES, {"days": 5})
+        summary = r["data"]["dailySummaries"][0]
+        for field in ["date", "totalProduction", "totalConsumption", "avgBatteryLevel", "readingCount"]:
+            assert field in summary
+
+    def test_resumenes_dias_parametro(self, admin):
+        admin.execute(SEED_HISTORICAL, {"days": 7})
+        s7 = admin.execute(QUERY_DAILY_SUMMARIES, {"days": 7})
+        s1 = admin.execute(QUERY_DAILY_SUMMARIES, {"days": 1})
+        assert len(s7["data"]["dailySummaries"]) >= len(s1["data"]["dailySummaries"])
+
+    def test_user_puede_ver_historial(self, user):
+        r = user.execute(QUERY_HISTORICAL, {})
+        assert not _has_errors(r)
+
+    def test_user_no_puede_hacer_seed(self, user):
+        r = user.execute(SEED_HISTORICAL, {"days": 1})
+        assert _has_errors(r) or r["data"].get("seedHistoricalData") is None
