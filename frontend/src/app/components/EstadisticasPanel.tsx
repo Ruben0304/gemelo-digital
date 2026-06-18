@@ -21,16 +21,12 @@ import {
   CalendarIcon,
   CalendarDaysIcon,
   ArrowPathIcon,
-  CloudArrowDownIcon,
   TableCellsIcon,
   DocumentTextIcon,
-  CheckCircleIcon,
-  ExclamationTriangleIcon,
-  XCircleIcon,
   SunIcon,
   SparklesIcon,
 } from '@heroicons/react/24/outline';
-import { executeQuery, executeMutation } from '@/lib/graphql-client';
+import { executeQuery } from '@/lib/graphql-client';
 import {
   exportReadingsCsv,
   exportSummariesCsv,
@@ -73,12 +69,6 @@ const DAILY_SUMMARIES_QUERY = `
       avgEfficiency
       readingCount
     }
-  }
-`;
-
-const SEED_MUTATION = `
-  mutation SeedHistoricalData($days: Int) {
-    seedHistoricalData(days: $days)
   }
 `;
 
@@ -162,21 +152,9 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
   const [readings, setReadings] = useState<HistoricalReading[]>([]);
   const [summaries, setSummaries] = useState<DailySummary[]>([]);
   const [loading, setLoading] = useState(false);
-  const [seeding, setSeeding] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState(14);
-  const [seedMessage, setSeedMessage] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem('gd_auth_user');
-      if (stored) setIsAdmin(JSON.parse(stored)?.role === 'admin');
-    } catch {
-      setIsAdmin(false);
-    }
-  }, []);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -211,25 +189,6 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
   useEffect(() => {
     if (mode === 'historico') fetchData();
   }, [mode, fetchData]);
-
-  const handleSeed = async () => {
-    setSeeding(true);
-    setSeedMessage(null);
-    try {
-      const data = await executeMutation<{ seedHistoricalData: number }>(SEED_MUTATION, { days: 30 });
-      const count = data?.seedHistoricalData ?? 0;
-      setSeedMessage(
-        count > 0
-          ? { type: 'success', text: `Se generaron ${count} lecturas simuladas para los últimos 30 días.` }
-          : { type: 'warning', text: 'Los datos ya existían. No se insertaron registros adicionales.' },
-      );
-      await fetchData();
-    } catch (err) {
-      setSeedMessage({ type: 'error', text: err instanceof Error ? err.message : 'Error al generar datos.' });
-    } finally {
-      setSeeding(false);
-    }
-  };
 
   const handleExportCsv = () => {
     if (histView === 'daily' && summaries.length > 0) exportSummariesCsv(summaries, 'GemeloDigital');
@@ -364,10 +323,7 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
           setDays={setDays}
           loading={loading}
           error={error}
-          isAdmin={isAdmin}
-          seeding={seeding}
           exporting={exporting}
-          seedMessage={seedMessage}
           histHasData={histHasData}
           totalProduction={totalProduction}
           totalConsumption={totalConsumption}
@@ -376,7 +332,6 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
           dailyChartData={dailyChartData}
           hourlyChartData={hourlyChartData}
           onRefresh={fetchData}
-          onSeed={handleSeed}
           onExportCsv={handleExportCsv}
           onExportPdf={handleExportPdf}
         />
@@ -396,10 +351,7 @@ function HistoricalView({
   setDays,
   loading,
   error,
-  isAdmin,
-  seeding,
   exporting,
-  seedMessage,
   histHasData,
   totalProduction,
   totalConsumption,
@@ -408,7 +360,6 @@ function HistoricalView({
   dailyChartData,
   hourlyChartData,
   onRefresh,
-  onSeed,
   onExportCsv,
   onExportPdf,
 }: {
@@ -418,10 +369,7 @@ function HistoricalView({
   setDays: (d: number) => void;
   loading: boolean;
   error: string | null;
-  isAdmin: boolean;
-  seeding: boolean;
   exporting: boolean;
-  seedMessage: { type: 'success' | 'warning' | 'error'; text: string } | null;
   histHasData: boolean;
   totalProduction: number;
   totalConsumption: number;
@@ -430,7 +378,6 @@ function HistoricalView({
   dailyChartData: Array<{ fecha: string; Producción: number; Consumo: number }>;
   hourlyChartData: Array<{ time: string; Producción: number; Consumo: number }>;
   onRefresh: () => void;
-  onSeed: () => void;
   onExportCsv: () => void;
   onExportPdf: () => void;
 }) {
@@ -480,18 +427,6 @@ function HistoricalView({
           Actualizar
         </button>
 
-        {isAdmin && (
-          <button
-            onClick={onSeed}
-            disabled={seeding}
-            className="flex items-center gap-2 rounded-xl border border-indigo-500 bg-indigo-700 px-3 py-2 text-sm text-white transition hover:bg-indigo-600 disabled:opacity-50"
-            title="Generar datos simulados de demostración"
-          >
-            <CloudArrowDownIcon className={`h-4 w-4 ${seeding ? 'animate-bounce' : ''}`} />
-            {seeding ? 'Generando…' : 'Generar datos de prueba'}
-          </button>
-        )}
-
         {histHasData && (
           <>
             <button
@@ -515,24 +450,6 @@ function HistoricalView({
         )}
       </div>
 
-      {seedMessage && (
-        <div
-          role={seedMessage.type === 'error' ? 'alert' : 'status'}
-          className={`flex items-center gap-2 rounded-xl border px-4 py-3 text-sm ${
-            seedMessage.type === 'success'
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-              : seedMessage.type === 'warning'
-                ? 'border-amber-200 bg-amber-50 text-amber-700'
-                : 'border-red-200 bg-red-50 text-red-600'
-          }`}
-        >
-          {seedMessage.type === 'success' && <CheckCircleIcon className="h-5 w-5 flex-shrink-0" />}
-          {seedMessage.type === 'warning' && <ExclamationTriangleIcon className="h-5 w-5 flex-shrink-0" />}
-          {seedMessage.type === 'error' && <XCircleIcon className="h-5 w-5 flex-shrink-0" />}
-          <span>{seedMessage.text}</span>
-        </div>
-      )}
-
       {/* KPIs (daily view) */}
       {histView === 'daily' && histHasData && (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -552,9 +469,7 @@ function HistoricalView({
           <ChartBarIcon className="mx-auto mb-4 h-12 w-12 text-slate-300" />
           <p className="font-medium text-slate-600">Sin datos históricos</p>
           <p className="mx-auto mt-1 mb-4 max-w-md text-sm text-slate-500">
-            {isAdmin
-              ? 'El sistema aún no ha acumulado lecturas. Use «Generar datos de prueba» para poblar la serie histórica.'
-              : 'El sistema aún no ha acumulado lecturas para el período seleccionado.'}
+            El sistema aún no ha acumulado lecturas para el período seleccionado.
           </p>
         </div>
       )}
