@@ -1,0 +1,37 @@
+
+============================================================
+SOLAR PANEL DUST DETECTION - MODEL SUMMARY
+============================================================
+
+Date: 2025-11-11 17:16:22
+Model Architecture: MobileNetV2 (Transfer Learning)
+Input Size: 224x224x3
+Training Epochs: 6
+
+DATASET:
+  - Training samples:   2051
+  - Validation samples: 511
+  - Clean panels:       1493
+  - Dusty panels:       1069
+
+PERFORMANCE METRICS:
+  - Accuracy:  0.7867 (78.67%)
+  - Precision: 0.8421 (84.21%)
+  - Recall:    0.6009 (60.09%)
+  - F1-Score:  0.7014 (70.14%)
+  - AUC-ROC:   0.8373
+
+CONFUSION MATRIX:
+  - True Negatives:  274
+  - False Positives: 24
+  - False Negatives: 85
+  - True Positives:  128
+
+ARTIFACTS SAVED:
+  - Model:              artifacts/best_model.keras
+  - Training history:   artifacts/training_history.png
+  - Confusion matrix:   artifacts/confusion_matrix.png
+  - ROC curve:          artifacts/roc_curve.png
+  - Sample predictions: artifacts/sample_predictions.png
+
+============================================================

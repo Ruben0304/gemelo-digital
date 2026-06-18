@@ -1,0 +1,53 @@
+{
+  "model_name": "Random Forest",
+  "train_date": "2025-11-12 10:00:12",
+  "features": [
+    "temperature_2m",
+    "relative_humidity_2m",
+    "wind_speed_10m",
+    "cloud_cover",
+    "shortwave_radiation",
+    "hour_sin",
+    "hour_cos",
+    "month_sin",
+    "month_cos"
+  ],
+  "test_rmse": 536.8593939214904,
+  "test_mae": 229.12095622704214,
+  "test_r2": 0.8543214673231523,
+  "cv_rmse": 600.7510883346237,
+  "training_samples": 7008,
+  "test_samples": 1752,
+  "requires_scaling": false,
+  "reference_capacity_kw": 7701.0,
+  "_notes": {
+    "what_is_this": "Metadata del modelo de predicción de producción solar usado por el backend (archivo .pkl + este JSON).",
+    "target": {
+      "column": "SystemProduction",
+      "unit": "kW",
+      "meaning": "Potencia/producción del sistema en la serie horaria del dataset."
+    },
+    "features_unit_note": "Las variables meteorológicas provienen de Open-Meteo y se complementan con variables temporales (sin/cos de hora y mes).",
+    "train_test_split": {
+      "method": "train_test_split",
+      "test_size": 0.2,
+      "random_state": 42,
+      "shuffle": true,
+      "note": "Las métricas 'test_*' se calculan sobre este conjunto de prueba."
+    },
+    "metrics_explained": {
+      "test_mae": "Mean Absolute Error en el conjunto de prueba (kW). Promedio de |y_true - y_pred|.",
+      "test_rmse": "Root Mean Squared Error en el conjunto de prueba (kW). Penaliza más los errores grandes.",
+      "test_r2": "Coeficiente de determinación en prueba (adimensional). 1.0 = perfecto, 0.0 ≈ predecir la media.",
+      "cv_rmse": "Promedio del RMSE (kW) en validación cruzada 5-fold sobre el conjunto de entrenamiento."
+    },
+    "how_to_interpret": {
+      "reference_capacity_kw": "Capacidad máxima observada en el dataset (max de SystemProduction). Sirve como referencia para convertir errores a porcentaje.",
+      "rough_relative_errors": {
+        "mae_over_capacity": "test_mae / reference_capacity_kw ≈ 0.03 (≈3%)",
+        "rmse_over_capacity": "test_rmse / reference_capacity_kw ≈ 0.07 (≈7%)"
+      },
+      "important_note": "Como SystemProduction tiene muchos ceros y picos altos, MAE/RMSE globales pueden verse afectados; para análisis fino conviene métricas solo cuando y_true > 0."
+    }
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "model_name": "Havana random_forest (capacity factor)",
+  "algorithm": "random_forest",
+  "train_date": "2026-06-10 14:47:02",
+  "features": [
+    "shortwave_radiation",
+    "clearsky_ghi",
+    "clearsky_index",
+    "solar_elevation",
+    "effective_irradiance",
+    "cloud_cover",
+    "temperature_2m",
+    "relative_humidity_2m",
+    "wind_speed_10m",
+    "temp_loss_factor",
+    "hour_sin",
+    "hour_cos",
+    "month_sin",
+    "month_cos"
+  ],
+  "target": "capacity_factor",
+  "output_is_capacity_factor": true,
+  "reference_capacity_kw": 1.0,
+  "requires_scaling": false,
+  "data_source": "PVGIS (NSRDB) production + Open-Meteo archive weather, La Habana",
+  "training_years": "2010-2015",
+  "training_samples": 42067,
+  "test_samples": 10517,
+  "test_rmse": 0.11444021508054053,
+  "test_mae": 0.07544071955590792,
+  "test_r2": 0.7894963873820526,
+  "metrics": {
+    "rmse": 0.08016783779060033,
+    "mae": 0.03703013834760901,
+    "r2": 0.8989171206087062,
+    "daylight_rmse": 0.11444021508054053,
+    "daylight_mae": 0.07544071955590792,
+    "daylight_r2": 0.7894963873820526
+  },
+  "all_models": {
+    "linear": {
+      "rmse": 0.08748505555684573,
+      "mae": 0.04875786628107882,
+      "r2": 0.8796225864850507,
+      "daylight_rmse": 0.12361298027466201,
+      "daylight_mae": 0.08814996538986708,
+      "daylight_r2": 0.7543988605574528
+    },
+    "random_forest": {
+      "rmse": 0.08016783779060033,
+      "mae": 0.03703013834760901,
+      "r2": 0.8989171206087062,
+      "daylight_rmse": 0.11444021508054053,
+      "daylight_mae": 0.07544071955590792,
+      "daylight_r2": 0.7894963873820526
+    },
+    "hist_gbm": {
+      "rmse": 0.08096595141244863,
+      "mae": 0.036972161778847275,
+      "r2": 0.8968944339637989,
+      "daylight_rmse": 0.11557787389922748,
+      "daylight_mae": 0.07507928569937239,
+      "daylight_r2": 0.7852903197529439
+    }
+  }
+}
