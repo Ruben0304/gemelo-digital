@@ -26,12 +26,8 @@ dist/
 .env.local
 .env.*.local
 
-# ML models (large binaries)
-**/*.pkl
-**/*.joblib
-**/*.h5
-**/*.pt
-**/*.pth
+# ML models — incluidos en repo (artefactos de tesis)
+# **/*.pkl  ← mantenidos intencionalmente
 
 # IDE
 .vscode/
