@@ -222,8 +222,13 @@ def _rebuild_profile(appliance_id: str) -> None:
         )
         return
 
+    appliance_doc = _db()["electrodomesticos"].find_one(
+        {"_id": ObjectId(appliance_id)}, {"uncoveredHoursFill": 1}
+    ) or {}
+    uncovered_fill = appliance_doc.get("uncoveredHoursFill") or "mean"
+
     samples = [(r["timestamp"], r["powerKw"]) for r in readings]
-    profile = build_hourly_profile(samples)
+    profile = build_hourly_profile(samples, uncovered_fill=uncovered_fill)
     meta = profile["meta"]
     avg_w = round(float(meta["avgKw"]) * 1000.0, 2)
     max_w = round(float(meta["maxKw"]) * 1000.0, 2)

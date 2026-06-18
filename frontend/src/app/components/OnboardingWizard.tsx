@@ -83,6 +83,8 @@ interface ApplianceDraft {
   maxPowerW: number;
   quantity: number;
   activeHours?: number;
+  activeHourMask?: number[];
+  uncoveredHoursFill?: 'mean' | 'zero';
   isMediciones?: boolean;
 }
 
@@ -573,7 +575,7 @@ function StepRail({ step }: { step: number }) {
           textTransform: 'uppercase',
         }}
       >
-        CUJAE · La Habana
+        Gemelo Digital
       </p>
     </aside>
   );
@@ -874,7 +876,7 @@ function LocationContent({
             hint="Aparecerá en reportes y en el panel principal."
             delay={220}
           >
-            <Input value={name} onChange={setName} placeholder="CUJAE — La Habana, Cuba" />
+            <Input value={name} onChange={setName} placeholder="Gemelo Digital" />
           </Field>
         </div>
 
@@ -1125,6 +1127,104 @@ function BatteryContent({
   );
 }
 
+// Rejilla de 24 horas para definir el horario de uso de un equipo manual.
+function WizHourGrid({
+  selected, onChange,
+}: {
+  selected: number[];
+  onChange: (mask: number[]) => void;
+}) {
+  const set = new Set(selected);
+  const toggle = (h: number) => {
+    const next = new Set(set);
+    if (next.has(h)) next.delete(h); else next.add(h);
+    onChange([...next].sort((a, b) => a - b));
+  };
+  const count = set.size;
+  const continuous = count === 0 || count === 24;
+  return (
+    <div style={{ borderRadius: 14, border: `1px solid ${C.borderLight}`, background: C.bgChip, padding: 14 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
+        <div>
+          <p style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Horario de uso</p>
+          <p style={{ fontSize: 11, color: C.text4, marginTop: 2 }}>
+            {continuous ? 'Sin selección = encendido las 24 h.' : `${count} h/día seleccionadas.`}
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button type="button" onClick={() => onChange(Array.from({ length: 24 }, (_, i) => i))}
+            style={{ fontFamily: FONT_STACK, fontSize: 11, fontWeight: 600, color: C.text2, background: C.white, border: `1px solid ${C.border}`, borderRadius: 999, padding: '4px 10px', cursor: 'pointer' }}>
+            Todo el día
+          </button>
+          <button type="button" onClick={() => onChange([])}
+            style={{ fontFamily: FONT_STACK, fontSize: 11, fontWeight: 600, color: C.text2, background: C.white, border: `1px solid ${C.border}`, borderRadius: 999, padding: '4px 10px', cursor: 'pointer' }}>
+            Limpiar
+          </button>
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: 5 }}>
+        {Array.from({ length: 24 }, (_, h) => {
+          const on = set.has(h);
+          return (
+            <button key={h} type="button" onClick={() => toggle(h)}
+              title={`${String(h).padStart(2, '0')}:00 – ${String((h + 1) % 24).padStart(2, '0')}:00`}
+              style={{
+                fontFamily: FONT_STACK, fontSize: 11, fontWeight: 600,
+                fontVariantNumeric: 'tabular-nums', cursor: 'pointer',
+                borderRadius: 8, padding: '6px 0',
+                border: on ? '1px solid #f59e0b' : `1px solid ${C.borderLight}`,
+                background: on ? '#f59e0b' : C.white,
+                color: on ? '#fff' : C.text3,
+                transition: 'all 0.12s ease',
+              }}>
+              {String(h).padStart(2, '0')}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Selector de relleno para horas sin medición (equipos de mediciones).
+function WizUncoveredFill({
+  value, onChange,
+}: {
+  value: 'mean' | 'zero';
+  onChange: (v: 'mean' | 'zero') => void;
+}) {
+  const opts = [
+    { v: 'mean' as const, label: 'Promedio del equipo' },
+    { v: 'zero' as const, label: '0 kW (apagado)' },
+  ];
+  return (
+    <div style={{ borderRadius: 14, border: '1px solid #bae6fd', background: '#f0f9ff', padding: 14 }}>
+      <p style={{ fontSize: 13, fontWeight: 600, color: '#0c4a6e' }}>Horas sin medición</p>
+      <p style={{ fontSize: 11, color: C.text4, marginTop: 2, marginBottom: 10 }}>
+        Qué consumo asignar a las franjas (día/hora) que no aparezcan en los datos cargados.
+      </p>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {opts.map(o => {
+          const active = value === o.v;
+          return (
+            <button key={o.v} type="button" onClick={() => onChange(o.v)}
+              style={{
+                flex: 1, fontFamily: FONT_STACK, fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
+                borderRadius: 9, padding: '8px 6px',
+                border: active ? '1px solid #38bdf8' : `1px solid ${C.borderLight}`,
+                background: active ? '#0ea5e9' : C.white,
+                color: active ? '#fff' : C.text2,
+                transition: 'all 0.12s ease',
+              }}>
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AppliancesContent({
   onSave, onSkip, onBack,
 }: {
@@ -1139,7 +1239,8 @@ function AppliancesContent({
   const [avgW, setAvgW] = useState('');
   const [maxW, setMaxW] = useState('');
   const [quantity, setQuantity] = useState('1');
-  const [activeHours, setActiveHours] = useState('');
+  const [activeHourMask, setActiveHourMask] = useState<number[]>([]);
+  const [uncoveredFill, setUncoveredFill] = useState<'mean' | 'zero'>('mean');
   const [saving, setSaving] = useState(false);
 
   const totalAvgW = items.reduce((sum, i) => sum + i.averagePowerW * i.quantity, 0);
@@ -1160,7 +1261,6 @@ function AppliancesContent({
     if (!canAdd) return;
     const max = parseFloat(maxW);
     const qty = parseInt(quantity);
-    const hours = parseFloat(activeHours);
     setItems(prev => [
       ...prev,
       {
@@ -1169,11 +1269,13 @@ function AppliancesContent({
         averagePowerW: dataMode === 'mediciones' ? 0 : avg,
         maxPowerW: dataMode === 'mediciones' ? 0 : (Number.isFinite(max) && max > 0 ? max : avg),
         quantity: Number.isFinite(qty) && qty > 0 ? qty : 1,
-        activeHours: dataMode === 'manual' && Number.isFinite(hours) && hours >= 0 ? hours : undefined,
+        activeHourMask: dataMode === 'manual' ? [...activeHourMask].sort((a, b) => a - b) : undefined,
+        uncoveredHoursFill: dataMode === 'mediciones' ? uncoveredFill : undefined,
         isMediciones: dataMode === 'mediciones',
       },
     ]);
-    setName(''); setCategory(''); setAvgW(''); setMaxW(''); setQuantity('1'); setActiveHours('');
+    setName(''); setCategory(''); setAvgW(''); setMaxW(''); setQuantity('1');
+    setActiveHourMask([]); setUncoveredFill('mean');
   };
 
   const removeItem = (index: number) => {
@@ -1312,17 +1414,22 @@ function AppliancesContent({
               <Field label="Cantidad" hint="Unidades de este equipo." delay={360}>
                 <Input value={quantity} onChange={setQuantity} type="number" step="1" min="1" placeholder="1" />
               </Field>
-              <Field label="Horas activas por día" hint="Opcional; uso diario estimado." delay={390}>
-                <Input value={activeHours} onChange={setActiveHours} type="number" step="0.5" min="0" max="24" placeholder="8" />
-              </Field>
+            </div>
+            <div className="wiz-stagger" style={{ animationDelay: '390ms' }}>
+              <WizHourGrid selected={activeHourMask} onChange={setActiveHourMask} />
             </div>
           </>
         ) : (
-          <div className="wiz-grid2">
-            <Field label="Cantidad" hint="Unidades de este equipo." delay={300}>
-              <Input value={quantity} onChange={setQuantity} type="number" step="1" min="1" placeholder="1" />
-            </Field>
-          </div>
+          <>
+            <div className="wiz-grid2">
+              <Field label="Cantidad" hint="Unidades de este equipo." delay={300}>
+                <Input value={quantity} onChange={setQuantity} type="number" step="1" min="1" placeholder="1" />
+              </Field>
+            </div>
+            <div className="wiz-stagger" style={{ animationDelay: '330ms' }}>
+              <WizUncoveredFill value={uncoveredFill} onChange={setUncoveredFill} />
+            </div>
+          </>
         )}
 
         <div className="wiz-stagger" style={{ animationDelay: '420ms', display: 'flex', justifyContent: 'flex-end' }}>
@@ -1395,9 +1502,11 @@ function AppliancesContent({
                     ) : (
                       <>
                         {item.averagePowerW * item.quantity} W
-                        {item.activeHours !== undefined && (
-                          <span style={{ color: C.text4, fontWeight: 400 }}> · {item.activeHours} h/día</span>
-                        )}
+                        {(() => {
+                          const m = item.activeHourMask ?? [];
+                          if (m.length === 0 || m.length === 24) return null;
+                          return <span style={{ color: C.text4, fontWeight: 400 }}> · {m.length} h/día</span>;
+                        })()}
                       </>
                     )}
                   </span>
@@ -1599,14 +1708,24 @@ export default function OnboardingWizard({ onComplete }: Props) {
     setSaveError(null);
     try {
       for (const item of items) {
+        const mask = item.isMediciones ? [] : (item.activeHourMask ?? []);
+        const scheduled = mask.length > 0 && mask.length < 24;
         await executeMutation(CREATE_APPLIANCE_MUTATION, {
           input: {
             name: item.name,
             category: item.category,
-            averagePowerW: item.averagePowerW,
-            maxPowerW: item.maxPowerW,
+            averagePowerW: item.isMediciones ? undefined : item.averagePowerW,
+            maxPowerW: item.isMediciones ? undefined : item.maxPowerW,
             quantity: item.quantity,
-            activeHours: item.activeHours,
+            activeHours: mask.length > 0
+              ? mask.length
+              : item.isMediciones
+              ? item.activeHours
+              : 24,
+            activeHourMask: mask,
+            alwaysOn: !scheduled,
+            useMeasurements: !!item.isMediciones,
+            uncoveredHoursFill: item.uncoveredHoursFill ?? 'mean',
           },
         });
       }

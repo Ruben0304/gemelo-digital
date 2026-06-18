@@ -394,6 +394,9 @@ class ApplianceType:
     selectedModeIndex: Optional[int]
     modes: List[ApplianceModeType]
     alwaysOn: bool = True
+    useMeasurements: bool = False
+    activeHourMask: List[int] = strawberry.field(default_factory=list)
+    uncoveredHoursFill: str = "mean"
     hourlyProfileKw: List[float] = strawberry.field(default_factory=list)
     measurementMeta: Optional[ApplianceMeasurementMetaType] = None
     createdAt: Optional[str]
@@ -738,6 +741,7 @@ def _map_appliance(data: dict) -> ApplianceType:
         data_copy["id_"] = data_copy.pop("_id")
     data_copy["modes"] = [_map_appliance_mode(mode) for mode in data.get("modes", [])]
     data_copy["alwaysOn"] = True if data.get("alwaysOn") is None else bool(data.get("alwaysOn"))
+    data_copy["useMeasurements"] = bool(data.get("useMeasurements", False))
     data_copy["hourlyProfileKw"] = list(data.get("hourlyProfileKw") or [])
     meta = data.get("measurementMeta")
     data_copy["measurementMeta"] = (
@@ -947,8 +951,8 @@ class Query:
         return _map_weather(weather)
 
     @strawberry.field
-    async def predictions(self) -> PredictionsPayload:
-        data = await get_predictions_bundle()
+    async def predictions(self, hours: int = 24) -> PredictionsPayload:
+        data = await get_predictions_bundle(hours=hours)
         return PredictionsPayload(
             predictions=[PredictionType(**prediction) for prediction in data["predictions"]],
             alerts=[AlertType(**alert) for alert in data["alerts"]],
@@ -1001,6 +1005,7 @@ class Query:
         contribute averagePowerW * quantity converted to kW.
         """
         from datetime import datetime as _dt, timedelta as _td
+        from zoneinfo import ZoneInfo as _ZoneInfo
 
         from app.services.appliance_measurement_service import forecast_kw
 
@@ -1008,10 +1013,12 @@ class Query:
             try:
                 begin = _dt.fromisoformat(start.replace("Z", "+00:00")).replace(tzinfo=None)
             except ValueError:
-                begin = _dt.utcnow()
+                begin = _dt.now(_ZoneInfo("America/Havana")).replace(tzinfo=None)
         else:
-            now = _dt.utcnow()
-            begin = (now + _td(hours=1)).replace(minute=0, second=0, microsecond=0)
+            # Hora local de La Habana (igual que predictions / mlPredictNextHours)
+            # para que el consumo se alinee por hora con esas series.
+            now = _dt.now(_ZoneInfo("America/Havana")).replace(tzinfo=None)
+            begin = now.replace(minute=0, second=0, microsecond=0)
 
         hours = max(1, min(int(hours), 24 * 14))
         items = list_appliances()
@@ -1026,20 +1033,35 @@ class Query:
             if appliance.get("hourlyProfileKw"):
                 with_profile_count += 1
 
+        # Precompute per-appliance shape: profile / scheduled mask / flat 24h.
+        prepared = []
+        for appliance in items:
+            profile = appliance.get("hourlyProfileKw") or []
+            if len(profile) == 168:
+                prepared.append(("profile", profile, None))
+                continue
+            avg_w = float(appliance.get("averagePowerW") or 0)
+            qty = int(appliance.get("quantity") or 1)
+            power_kw = (avg_w * qty) / 1000.0
+            mask = {int(h) for h in (appliance.get("activeHourMask") or []) if 0 <= int(h) <= 23}
+            if mask:
+                prepared.append(("mask", power_kw, mask))
+            elif (True if appliance.get("alwaysOn") is None else bool(appliance.get("alwaysOn"))):
+                prepared.append(("flat", power_kw, None))
+            # else: equipo sin horario y no continuo → no aporta al pronóstico
+
         running_total = 0.0
         for i in range(hours):
             dt = begin + _td(hours=i)
             total_kw = 0.0
-            for appliance in items:
-                if not (True if appliance.get("alwaysOn") is None else bool(appliance.get("alwaysOn"))):
-                    continue
-                profile = appliance.get("hourlyProfileKw") or []
-                if len(profile) == 168:
-                    total_kw += forecast_kw(profile, dt)
-                else:
-                    avg_w = float(appliance.get("averagePowerW") or 0)
-                    qty = int(appliance.get("quantity") or 1)
-                    total_kw += (avg_w * qty) / 1000.0
+            for kind, value, mask in prepared:
+                if kind == "profile":
+                    total_kw += forecast_kw(value, dt)
+                elif kind == "mask":
+                    if dt.hour in mask:
+                        total_kw += value
+                else:  # flat
+                    total_kw += value
             running_total += total_kw
             points.append(
                 HourlyForecastPoint(datetime=dt.isoformat(), consumptionKw=round(total_kw, 4))
@@ -1659,14 +1681,17 @@ class ApplianceModeInput:
 class ApplianceInput:
     name: str
     category: Optional[str] = None
-    averagePowerW: float
-    maxPowerW: float
+    averagePowerW: Optional[float] = None
+    maxPowerW: Optional[float] = None
     measuredPowerW: Optional[float] = None
     quantity: int
     activeHours: Optional[float] = None
     selectedModeIndex: Optional[int] = None
     modes: Optional[List[ApplianceModeInput]] = None
     alwaysOn: Optional[bool] = True
+    useMeasurements: Optional[bool] = False
+    activeHourMask: Optional[List[int]] = None
+    uncoveredHoursFill: Optional[str] = None
 
 
 @strawberry.input

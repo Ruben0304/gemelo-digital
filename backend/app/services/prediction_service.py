@@ -145,7 +145,7 @@ def _calculate_prediction_confidence(hours_ahead: int, cloud_cover: float) -> fl
     return max(50, min(95, confidence))
 
 
-def generate_hourly_predictions(weather_forecast: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+def generate_hourly_predictions(weather_forecast: List[Dict[str, Any]], config: Dict[str, Any], hours: int = 24) -> List[Dict[str, Any]]:
     predictions: List[Dict[str, Any]] = []
     # Hora local de La Habana (no UTC): la curva diaria y el corte día/noche se
     # calculan sobre la hora solar local, si no la producción "actual" sale
@@ -157,11 +157,12 @@ def generate_hourly_predictions(weather_forecast: List[Dict[str, Any]], config: 
     # sistema), no un valor fijo de un sistema de otro tamaño.
     consumption_profile = get_active_profile()
 
-    for hour_offset in range(24):
+    hours = max(1, min(int(hours), 24 * 7))
+    for hour_offset in range(hours):
         timestamp = now + timedelta(hours=hour_offset)
         hour = timestamp.hour
-        forecast_candidate = weather_forecast[0] if hour_offset < 12 else (weather_forecast[1] if len(weather_forecast) > 1 else None)
-        forecast = forecast_candidate or fallback_forecast
+        forecast_idx = min(hour_offset // 12, len(weather_forecast) - 1)
+        forecast = (weather_forecast[forecast_idx] if forecast_idx >= 0 else None) or fallback_forecast
         if not forecast:
             continue
 
@@ -422,7 +423,7 @@ def generate_recommendations(
     return recommendations
 
 
-async def get_predictions_bundle() -> Dict[str, Any]:
+async def get_predictions_bundle(hours: int = 24) -> Dict[str, Any]:
     config = get_system_config()
     weather_data = await get_weather_with_fallback(
         config["location"]["lat"],
@@ -430,7 +431,7 @@ async def get_predictions_bundle() -> Dict[str, Any]:
         config["solar"]["capacityKw"],
         config["location"]["name"],
     )
-    predictions = generate_hourly_predictions(weather_data["forecast"], config)
+    predictions = generate_hourly_predictions(weather_data["forecast"], config, hours=hours)
     timeline = build_projected_solar_timeline(predictions, config["battery"], 75)
     battery_projection = generate_battery_projection(
         timeline,

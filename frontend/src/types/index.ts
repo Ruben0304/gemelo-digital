@@ -154,6 +154,9 @@ export interface ApplianceConfig {
   selectedModeIndex?: number;   // Índice de modo activo (opcional)
   modes?: ApplianceMode[];      // Modos de consumo opcionales
   alwaysOn?: boolean;           // Permanece encendido salvo desactivación manual
+  useMeasurements?: boolean;    // El equipo usa datos del analizador de red
+  activeHourMask?: number[];    // Horas del día (0-23) en que está encendido; vacío = 24h
+  uncoveredHoursFill?: 'mean' | 'zero'; // Horas sin medición: promedio global o 0 kW
   hourlyProfileKw?: number[];   // 168 valores (7 días x 24 h) generados desde archivo
   measurementMeta?: ApplianceMeasurementMeta | null;
   createdAt?: string;

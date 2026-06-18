@@ -30,6 +30,8 @@ interface ApplianceFormState {
   measuredPowerW: string;
   quantity: string;
   activeHours: string;
+  activeHourMask: number[];
+  uncoveredHoursFill: 'mean' | 'zero';
   selectedModeIndex: string;
   modes: ApplianceMode[];
 }
@@ -61,6 +63,8 @@ const emptyForm: ApplianceFormState = {
   measuredPowerW: '',
   quantity: '1',
   activeHours: '',
+  activeHourMask: [],
+  uncoveredHoursFill: 'mean',
   selectedModeIndex: '',
   modes: [],
 };
@@ -89,8 +93,10 @@ const toFormState = (appliance: ApplianceConfig): ApplianceFormState => ({
   measuredPowerW: appliance.measuredPowerW?.toString() ?? '',
   quantity: appliance.quantity?.toString() ?? '1',
   activeHours: appliance.activeHours?.toString() ?? '',
+  activeHourMask: appliance.activeHourMask ?? [],
+  uncoveredHoursFill: appliance.uncoveredHoursFill === 'zero' ? 'zero' : 'mean',
   selectedModeIndex:
-    appliance.selectedModeIndex !== undefined ? appliance.selectedModeIndex.toString() : '',
+    appliance.selectedModeIndex != null ? appliance.selectedModeIndex.toString() : '',
   modes: appliance.modes ?? [],
 });
 
@@ -105,6 +111,94 @@ const readFileAsText = (file: File): Promise<string> =>
 
 function applianceKey(appliance: ApplianceConfig, index: number): string {
   return appliance._id ?? `${appliance.name}-${index}`;
+}
+
+const fmtHour = (h: number) => `${String(h).padStart(2, '0')}:00`;
+
+// Resume una máscara de horas en bloques contiguos, ej. "07–10, 18–22".
+function formatHourMask(mask: number[]): string {
+  if (!mask || mask.length === 0 || mask.length === 24) return '';
+  const sorted = [...mask].sort((a, b) => a - b);
+  const ranges: string[] = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+  for (let i = 1; i <= sorted.length; i++) {
+    const h = sorted[i];
+    if (h !== prev + 1) {
+      ranges.push(`${String(start).padStart(2, '0')}–${String((prev + 1) % 24).padStart(2, '0')}`);
+      start = h;
+    }
+    prev = h;
+  }
+  return ranges.join(', ');
+}
+
+function HourScheduleGrid({
+  selected,
+  onChange,
+}: {
+  selected: number[];
+  onChange: (mask: number[]) => void;
+}) {
+  const set = new Set(selected);
+  const toggle = (h: number) => {
+    const next = new Set(set);
+    if (next.has(h)) next.delete(h);
+    else next.add(h);
+    onChange([...next].sort((a, b) => a - b));
+  };
+  const count = set.size;
+  const continuous = count === 0 || count === 24;
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h4 className="text-sm font-semibold text-slate-800">Horario de uso</h4>
+          <p className="text-xs text-slate-500">
+            Marca las horas en que el equipo está encendido.{' '}
+            {continuous ? 'Sin selección = encendido las 24 h.' : `${count} h/día seleccionadas.`}
+          </p>
+        </div>
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={() => onChange(Array.from({ length: 24 }, (_, i) => i))}
+            className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
+          >
+            Todo el día
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
+          >
+            Limpiar
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-12">
+        {Array.from({ length: 24 }, (_, h) => {
+          const on = set.has(h);
+          return (
+            <button
+              key={h}
+              type="button"
+              onClick={() => toggle(h)}
+              title={`${fmtHour(h)} – ${fmtHour((h + 1) % 24)}`}
+              className={`rounded-lg px-1 py-1.5 text-[11px] font-semibold tabular-nums transition-colors ${
+                on
+                  ? 'bg-amber-500 text-white shadow-sm'
+                  : 'border border-slate-200 bg-white text-slate-500 hover:bg-amber-50'
+              }`}
+            >
+              {String(h).padStart(2, '0')}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function resolveMode(appliance: ApplianceConfig, selectedIndex: number | undefined) {
@@ -229,18 +323,16 @@ export default function AppliancesManager({
     };
   }, [appliances, batteryCapacityWh, inverterCapacityW, runtimeHoursByKey, selectedModeByKey]);
 
-  const openModal = (mode: 'create' | 'edit', appliance?: ApplianceConfig) => {
+  const openModal = (mode: 'create' | 'edit', appliance?: ApplianceConfig, openBatchUpload = false) => {
     setModalMode(mode);
     setModalMessage(null);
     setForm(appliance ? toFormState(appliance) : emptyForm);
     setNewModeName('');
     setNewModeAveragePowerW('');
     setNewModeMaxPowerW('');
-    // Detect data mode from existing appliance
-    setDataMode(appliance?.measurementMeta ? 'mediciones' : 'manual');
-    // Reset batch state
+    setDataMode(openBatchUpload || appliance?.useMeasurements || appliance?.measurementMeta ? 'mediciones' : 'manual');
     setBatches([]);
-    setBatchAddOpen(false);
+    setBatchAddOpen(openBatchUpload);
     setBatchFile(null);
     setBatchPreview(null);
     setBatchStartDate('');
@@ -285,15 +377,28 @@ export default function AppliancesManager({
     }));
   };
 
-  const buildPayload = (state: ApplianceFormState) => {
+  const buildPayload = (state: ApplianceFormState, useMeasurements?: boolean) => {
+    const avgW = parseNumber(state.averagePowerW);
+    const maxW = parseNumber(state.maxPowerW);
+    // Horario de uso: solo aplica a equipos manuales. Vacío o las 24 h = continuo.
+    const mask = useMeasurements ? [] : [...state.activeHourMask].sort((a, b) => a - b);
+    const scheduled = mask.length > 0 && mask.length < 24;
     return cleanPayload({
       name: state.name.trim(),
       category: state.category.trim() || undefined,
-      averagePowerW: parseNumber(state.averagePowerW),
-      maxPowerW: parseNumber(state.maxPowerW),
+      averagePowerW: useMeasurements ? (avgW || undefined) : avgW,
+      maxPowerW: useMeasurements ? (maxW || undefined) : maxW,
       measuredPowerW: parseNumber(state.measuredPowerW),
       quantity: parseNumber(state.quantity),
-      activeHours: parseNumber(state.activeHours),
+      // Horas activas: del horario si se definió; si es manual continuo = 24 h.
+      activeHours: mask.length > 0
+        ? mask.length
+        : useMeasurements
+        ? parseNumber(state.activeHours)
+        : 24,
+      activeHourMask: mask,
+      alwaysOn: !scheduled,
+      uncoveredHoursFill: state.uncoveredHoursFill,
       selectedModeIndex:
         state.selectedModeIndex === '' ? undefined : parseNumber(state.selectedModeIndex),
       modes: state.modes.map((mode) =>
@@ -303,6 +408,7 @@ export default function AppliancesManager({
           maxPowerW: mode.maxPowerW,
         })
       ),
+      useMeasurements: useMeasurements ?? false,
     });
   };
 
@@ -312,7 +418,7 @@ export default function AppliancesManager({
     setLoading(true);
     setModalMessage(null);
 
-    const payload = buildPayload(form);
+    const payload = buildPayload(form, dataMode === 'mediciones');
 
     try {
       let applianceId = form._id;
@@ -373,28 +479,6 @@ export default function AppliancesManager({
         }
       },
     });
-  };
-
-  const saveQuickConfig = async (appliance: ApplianceConfig, key: string) => {
-    if (!appliance._id) return;
-    const payload = buildPayload({
-      ...toFormState(appliance),
-      activeHours: (runtimeHoursByKey[key] ?? appliance.activeHours ?? 0).toString(),
-      selectedModeIndex:
-        selectedModeByKey[key] !== undefined ? `${selectedModeByKey[key]}` : '',
-    });
-
-    try {
-      await executeMutation(UPDATE_APPLIANCE_MUTATION, { id: appliance._id, input: payload });
-      setMessage({ type: 'success', text: `Configuración guardada para ${appliance.name}.` });
-      await onRefresh?.();
-    } catch (error) {
-      console.error(error);
-      setMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'No se pudo guardar la configuración rápida.',
-      });
-    }
   };
 
   return (
@@ -479,6 +563,12 @@ export default function AppliancesManager({
               const maxPowerW = appliance.measuredPowerW ?? mode?.maxPowerW ?? appliance.maxPowerW;
               const runtimeHours = runtimeHoursByKey[key] ?? appliance.activeHours ?? 0;
               const plannedWh = averagePowerW * (appliance.quantity ?? 1) * runtimeHours;
+              const maskRanges = formatHourMask(appliance.activeHourMask ?? []);
+              const scheduleLabel = appliance.measurementMeta
+                ? 'Según perfil medido'
+                : maskRanges
+                ? `${maskRanges} · ${(appliance.activeHourMask ?? []).length} h/día`
+                : 'Encendido las 24 h';
 
               return (
                 <article
@@ -537,51 +627,42 @@ export default function AppliancesManager({
                       </label>
                     )}
 
-                    <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Horas encendido
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.25"
-                        value={runtimeHours}
-                        onChange={(event) =>
-                          setRuntimeHoursByKey((prev) => ({
-                            ...prev,
-                            [key]: Number(event.target.value) || 0,
-                          }))
-                        }
-                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700"
-                      />
-                    </label>
+                    <div className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Horario activo
+                      <div className="inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium normal-case tracking-normal text-amber-800">
+                        <Clock3 className="h-3.5 w-3.5 shrink-0" />
+                        {scheduleLabel}
+                      </div>
+                    </div>
                   </div>
 
-                  <footer className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                  <footer className="mt-4 flex flex-wrap justify-end gap-2">
+                    {(appliance.useMeasurements || appliance.measurementMeta) && (
+                      <button
+                        type="button"
+                        onClick={() => openModal('edit', appliance, true)}
+                        className="inline-flex items-center gap-2 rounded-full border border-sky-200 px-3 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-50"
+                      >
+                        <Upload className="h-3.5 w-3.5" />
+                        Agregar medición
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => saveQuickConfig(appliance, key)}
-                      className="inline-flex items-center gap-2 rounded-full border border-amber-200 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50"
+                      onClick={() => openModal('edit', appliance)}
+                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
                     >
-                      <Clock3 className="h-3.5 w-3.5" />
-                      Guardar tiempo/modo
+                      <Pencil className="h-3.5 w-3.5" />
+                      Editar
                     </button>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openModal('edit', appliance)}
-                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                        Editar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteAppliance(appliance)}
-                        className="inline-flex items-center gap-2 rounded-full border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
-                      >
-                        <Trash className="h-3.5 w-3.5" />
-                        Eliminar
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => deleteAppliance(appliance)}
+                      className="inline-flex items-center gap-2 rounded-full border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                    >
+                      <Trash className="h-3.5 w-3.5" />
+                      Eliminar
+                    </button>
                   </footer>
                 </article>
               );
@@ -718,32 +799,27 @@ export default function AppliancesManager({
 
                   {/* ── Solo en modo manual ──────────────────────────────── */}
                   {dataMode === 'manual' && (
-                    <>
-                      <FormField label="Potencia promedio (W)" required>
-                        <input
-                          required
-                          type="number"
-                          min="0"
-                          step="0.1"
-                          value={form.averagePowerW}
-                          onChange={handleInput('averagePowerW')}
-                          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                        />
-                      </FormField>
-                      <FormField label="Horas activas al día">
-                        <input
-                          type="number"
-                          min="0"
-                          max="24"
-                          step="0.25"
-                          value={form.activeHours}
-                          onChange={handleInput('activeHours')}
-                          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                        />
-                      </FormField>
-                    </>
+                    <FormField label="Potencia promedio (W)" required>
+                      <input
+                        required
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        value={form.averagePowerW}
+                        onChange={handleInput('averagePowerW')}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </FormField>
                   )}
                 </div>
+
+                {/* Horario de uso — solo modo manual */}
+                {dataMode === 'manual' && (
+                  <HourScheduleGrid
+                    selected={form.activeHourMask}
+                    onChange={(mask) => setForm((prev) => ({ ...prev, activeHourMask: mask }))}
+                  />
+                )}
 
                 {/* Sección de lotes de medición — solo modo mediciones */}
                 {dataMode === 'mediciones' && <div className="rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
@@ -752,6 +828,34 @@ export default function AppliancesManager({
                     <h4 className="text-sm font-semibold text-sky-900">
                       Mediciones Hioki (lotes acumulativos)
                     </h4>
+                  </div>
+
+                  {/* Horas sin cobertura: cómo rellenar las franjas no medidas */}
+                  <div className="mb-3 rounded-xl border border-sky-200 bg-white p-3">
+                    <p className="text-xs font-semibold text-sky-900">Horas sin medición</p>
+                    <p className="mb-2 text-[11px] text-slate-500">
+                      Qué consumo asignar a las franjas (día/hora) que no aparecen en los datos cargados.
+                    </p>
+                    <div className="flex gap-1.5">
+                      {([
+                        { v: 'mean', label: 'Promedio del equipo', hint: 'Rellena con el promedio general' },
+                        { v: 'zero', label: '0 kW (apagado)', hint: 'Asume que no consume' },
+                      ] as const).map((opt) => (
+                        <button
+                          key={opt.v}
+                          type="button"
+                          title={opt.hint}
+                          onClick={() => setForm((prev) => ({ ...prev, uncoveredHoursFill: opt.v }))}
+                          className={`flex-1 rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+                            form.uncoveredHoursFill === opt.v
+                              ? 'border-sky-400 bg-sky-500 text-white'
+                              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   {modalMode === 'create' ? (

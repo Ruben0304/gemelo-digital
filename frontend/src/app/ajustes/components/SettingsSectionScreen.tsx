@@ -54,7 +54,7 @@ const SETTINGS_DATA_QUERY = `
     appliances {
       _id name category averagePowerW maxPowerW measuredPowerW quantity activeHours selectedModeIndex
       modes { name averagePowerW maxPowerW }
-      alwaysOn
+      alwaysOn useMeasurements activeHourMask uncoveredHoursFill
       measurementMeta { samples avgKw minKw maxKw hoursCovered firstDate lastDate }
       createdAt updatedAt
     }

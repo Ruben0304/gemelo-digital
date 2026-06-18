@@ -161,11 +161,17 @@ def parse_measurement_file(content: str) -> List[Tuple[datetime, float]]:
     return samples
 
 
-def build_hourly_profile(samples: List[Tuple[datetime, float]]) -> Dict[str, Any]:
+def build_hourly_profile(
+    samples: List[Tuple[datetime, float]],
+    uncovered_fill: str = "mean",
+) -> Dict[str, Any]:
     """
     Build a 168-element profile (Monday=0 .. Sunday=6, hours 0..23) by
-    averaging real power within each (weekday, hour) bin. Hours with no
-    coverage fall back to the global mean so the profile is always dense.
+    averaging real power within each (weekday, hour) bin.
+
+    `uncovered_fill` controls hours with no samples:
+      - "mean": fall back to the global mean (profile always dense).
+      - "zero": treat uncovered hours as 0 kW (equipo apagado).
     """
     if not samples:
         raise ValueError("No hay muestras para construir el perfil.")
@@ -177,13 +183,14 @@ def build_hourly_profile(samples: List[Tuple[datetime, float]]) -> Dict[str, Any
 
     flat_powers = [p for _, p in samples]
     global_mean = sum(flat_powers) / len(flat_powers)
+    fill_value = 0.0 if uncovered_fill == "zero" else global_mean
 
     profile: List[float] = []
     for slot in bins:
         if slot:
             profile.append(sum(slot) / len(slot))
         else:
-            profile.append(global_mean)
+            profile.append(fill_value)
 
     timestamps = [dt for dt, _ in samples]
     meta = {

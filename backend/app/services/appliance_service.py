@@ -40,6 +40,22 @@ def _ensure_non_negative(value: Any, field: str) -> float:
     return number
 
 
+def _sanitize_hour_mask(raw: Any) -> List[int]:
+    if not raw:
+        return []
+    if not isinstance(raw, (list, tuple, set)):
+        raise ValueError("El campo activeHourMask debe ser una lista de horas.")
+    hours = set()
+    for value in raw:
+        try:
+            h = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= h <= 23:
+            hours.add(h)
+    return sorted(hours)
+
+
 def _ensure_text(value: Any, field: str) -> str:
     if value is None:
         raise ValueError(f"El campo {field} es obligatorio.")
@@ -95,6 +111,9 @@ def _map_appliance(doc: Dict[str, Any]) -> Dict[str, Any]:
         "selectedModeIndex": doc.get("selectedModeIndex"),
         "modes": doc.get("modes") or [],
         "alwaysOn": True if always_on is None else bool(always_on),
+        "useMeasurements": bool(doc.get("useMeasurements", False)),
+        "activeHourMask": list(doc.get("activeHourMask") or []),
+        "uncoveredHoursFill": doc.get("uncoveredHoursFill") or "mean",
         "hourlyProfileKw": doc.get("hourlyProfileKw") or [],
         "measurementMeta": doc.get("measurementMeta"),
         "createdAt": doc.get("createdAt").isoformat() if doc.get("createdAt") else None,
@@ -143,6 +162,9 @@ def create_appliance(payload: Dict[str, Any]) -> Dict[str, Any]:
         else None,
         "modes": modes,
         "alwaysOn": True if payload.get("alwaysOn") is None else bool(payload.get("alwaysOn")),
+        "useMeasurements": bool(payload.get("useMeasurements", False)),
+        "activeHourMask": _sanitize_hour_mask(payload.get("activeHourMask")),
+        "uncoveredHoursFill": "zero" if payload.get("uncoveredHoursFill") == "zero" else "mean",
         "hourlyProfileKw": payload.get("hourlyProfileKw") or [],
         "measurementMeta": payload.get("measurementMeta"),
         "createdAt": now,
@@ -164,10 +186,17 @@ def update_appliance(appliance_id: str, payload: Dict[str, Any]) -> Optional[Dic
         update["name"] = _ensure_text(payload.get("name"), "name")
     if "category" in payload:
         update["category"] = payload.get("category")
+    use_measurements = bool(payload.get("useMeasurements", False))
     if "averagePowerW" in payload and payload["averagePowerW"] is not None:
-        update["averagePowerW"] = _ensure_positive(payload["averagePowerW"], "averagePowerW")
+        val = float(payload["averagePowerW"])
+        if not use_measurements and val <= 0:
+            raise ValueError("El campo averagePowerW debe ser un número mayor que cero.")
+        update["averagePowerW"] = max(val, 0.0)
     if "maxPowerW" in payload and payload["maxPowerW"] is not None:
-        update["maxPowerW"] = _ensure_positive(payload["maxPowerW"], "maxPowerW")
+        val = float(payload["maxPowerW"])
+        if not use_measurements and val <= 0:
+            raise ValueError("El campo maxPowerW debe ser un número mayor que cero.")
+        update["maxPowerW"] = max(val, 0.0)
     if "measuredPowerW" in payload:
         value = payload["measuredPowerW"]
         update["measuredPowerW"] = (
@@ -185,6 +214,18 @@ def update_appliance(appliance_id: str, payload: Dict[str, Any]) -> Optional[Dic
         update["modes"] = _sanitize_modes(payload.get("modes"))
     if "alwaysOn" in payload:
         update["alwaysOn"] = bool(payload.get("alwaysOn"))
+    if "useMeasurements" in payload:
+        update["useMeasurements"] = bool(payload.get("useMeasurements"))
+    if "activeHourMask" in payload:
+        update["activeHourMask"] = _sanitize_hour_mask(payload.get("activeHourMask"))
+    fill_changed = False
+    if "uncoveredHoursFill" in payload:
+        new_fill = "zero" if payload.get("uncoveredHoursFill") == "zero" else "mean"
+        existing_doc = _collection().find_one(
+            {"_id": _object_id(appliance_id)}, {"uncoveredHoursFill": 1}
+        ) or {}
+        fill_changed = (existing_doc.get("uncoveredHoursFill") or "mean") != new_fill
+        update["uncoveredHoursFill"] = new_fill
 
     if not update:
         return get_appliance(appliance_id)
@@ -209,6 +250,15 @@ def update_appliance(appliance_id: str, payload: Dict[str, Any]) -> Optional[Dic
         {"$set": update},
         return_document=True,
     )
+    # Si cambió el relleno de horas sin cobertura, reconstruir el perfil 168h
+    # desde las lecturas almacenadas para que el cambio surta efecto ya.
+    if result and fill_changed:
+        try:
+            from app.services.medicion_service import _rebuild_profile
+            _rebuild_profile(appliance_id)
+            result = _collection().find_one({"_id": _object_id(appliance_id)})
+        except Exception:
+            pass
     return _map_appliance(result) if result else None
 
 
@@ -225,8 +275,13 @@ def attach_measurement(appliance_id: str, file_content: str) -> Dict[str, Any]:
     derived values (kW -> W) so the manual inputs stay consistent with the
     uploaded measurements.
     """
+    existing = _collection().find_one(
+        {"_id": _object_id(appliance_id)}, {"uncoveredHoursFill": 1}
+    ) or {}
+    uncovered_fill = existing.get("uncoveredHoursFill") or "mean"
+
     samples = parse_measurement_file(file_content)
-    profile = build_hourly_profile(samples)
+    profile = build_hourly_profile(samples, uncovered_fill=uncovered_fill)
     meta = profile["meta"]
     avg_w = round(float(meta["avgKw"]) * 1000.0, 2)
     max_w = round(float(meta["maxKw"]) * 1000.0, 2)

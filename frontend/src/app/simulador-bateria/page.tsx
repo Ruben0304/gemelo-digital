@@ -28,14 +28,17 @@ const CHARGE_EFFICIENCY = 0.9;
 
 const SIMULATOR_QUERY = `
   query SimulatorData {
-    predictions {
+    predictions(hours: 48) {
       predictions {
         timestamp hour expectedProduction expectedConsumption confidence
       }
     }
-    mlPredictNextHours(hours: 24) {
+    mlPredictNextHours(hours: 48) {
       datetime
       productionKw
+    }
+    appliancesConsumptionForecast(hours: 48) {
+      points { datetime consumptionKw }
     }
     batteries { _id manufacturer model capacityKwh quantity }
     solar {
@@ -44,6 +47,13 @@ const SIMULATOR_QUERY = `
     }
   }
 `;
+
+// Igual que el dashboard: clave por año-mes-día-hora para casar pronósticos.
+function buildHourKey(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}`;
+}
 
 interface SimPoint {
   label: string;
@@ -58,11 +68,30 @@ interface SimPoint {
 interface QueryResult {
   predictions: { predictions: Prediction[] };
   mlPredictNextHours?: { datetime: string; productionKw: number }[];
+  appliancesConsumptionForecast?: { points: { datetime: string; consumptionKw: number }[] };
   batteries: BatteryConfig[];
   solar: {
     battery: { chargeLevel: number };
     config: { battery: { capacityKwh: number } };
   };
+}
+
+const INTERVAL_OPTIONS = [1, 2, 3, 4, 6, 8, 12] as const;
+
+function aggregatePredictions(preds: Prediction[], interval: number): Prediction[] {
+  if (interval <= 1) return preds;
+  const result: Prediction[] = [];
+  for (let i = 0; i < preds.length; i += interval) {
+    const group = preds.slice(i, i + interval);
+    if (group.length === 0) continue;
+    result.push({
+      ...group[0],
+      expectedProduction: group.reduce((s, p) => s + p.expectedProduction, 0),
+      expectedConsumption: group.reduce((s, p) => s + p.expectedConsumption, 0),
+      confidence: group.reduce((s, p) => s + p.confidence, 0) / group.length,
+    });
+  }
+  return result;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -82,7 +111,7 @@ function runSim(
 
 function simulate(
   startPct: number, capacityKwh: number, predictions: Prediction[],
-  consReduction: number, prodBoost: number,
+  consReduction: number, prodBoost: number, intervalH: number,
 ): SimPoint[] {
   const base = runSim(startPct, capacityKwh, predictions, consReduction, prodBoost);
   const opt = runSim(startPct, capacityKwh, predictions,
@@ -90,15 +119,22 @@ function simulate(
   const pes = runSim(startPct, capacityKwh, predictions,
     Math.max(0, consReduction - CONS_ERROR_PCT), prodBoost - PROD_ERROR_PCT);
 
-  return predictions.map((p, i) => ({
-    label: `${String(p.hour).padStart(2, '0')}:00`,
-    batteryPct: base[i].pct,
-    batteryPctHigh: opt[i].pct,
-    batteryPctLow: pes[i].pct,
-    production: Math.round(base[i].prod * 100) / 100,
-    consumption: Math.round(base[i].cons * 100) / 100,
-    balance: Math.round(base[i].balance * 100) / 100,
-  }));
+  return predictions.map((p, i) => {
+    const h = p.hour;
+    const endH = (h + intervalH) % 24;
+    const label = intervalH > 1
+      ? `${String(h).padStart(2, '0')}–${String(endH).padStart(2, '0')}h`
+      : `${String(h).padStart(2, '0')}:00`;
+    return {
+      label,
+      batteryPct: base[i].pct,
+      batteryPctHigh: opt[i].pct,
+      batteryPctLow: pes[i].pct,
+      production: Math.round(base[i].prod * 100) / 100,
+      consumption: Math.round(base[i].cons * 100) / 100,
+      balance: Math.round(base[i].balance * 100) / 100,
+    };
+  });
 }
 
 function statusOf(pct: number) {
@@ -215,6 +251,9 @@ export default function SimuladorBateriaPage() {
   const [chargeLevel, setChargeLevel] = useState(60);
   const [consumptionReduction, setConsumptionReduction] = useState(0);
   const [productionBoost, setProductionBoost] = useState(0);
+  const [rangeStart, setRangeStart] = useState(0);
+  const [rangeEnd, setRangeEnd] = useState(12);
+  const [intervalH, setIntervalH] = useState(1);
   const [view, setView] = useState<'chart' | 'table'>('chart');
   const [showHelp, setShowHelp] = useState(false);
 
@@ -234,23 +273,50 @@ export default function SimuladorBateriaPage() {
 
   const capacityKwh = data?.solar?.config?.battery?.capacityKwh ?? 0;
   const moduleCount = data?.batteries?.reduce((a, b) => a + (b.quantity ?? 0), 0) ?? 0;
-  // Producción del modelo ML (kW, ya escalada) sobre el consumo del pronóstico.
+  // Producción del modelo ML (kW, ya escalada) y consumo de los electrodomésticos
+  // configurados (appliancesConsumptionForecast), igual que el dashboard.
   const predictions = useMemo(() => {
     const base = data?.predictions?.predictions ?? [];
     const ml = data?.mlPredictNextHours ?? [];
-    if (ml.length === 0) return base;
-    const byHour = new Map<number, number>();
-    ml.forEach((m) => byHour.set(new Date(m.datetime).getHours(), m.productionKw));
-    return base.map((p) => ({
-      ...p,
-      expectedProduction: byHour.get(p.hour) ?? p.expectedProduction,
-    }));
+    const appliancePts = data?.appliancesConsumptionForecast?.points ?? [];
+
+    const prodByHour = new Map<number, number>();
+    ml.forEach((m) => prodByHour.set(new Date(m.datetime).getHours(), m.productionKw));
+
+    const consByKey = new Map<string, number>();
+    const consByHour = new Map<number, number>();
+    appliancePts.forEach((pt) => {
+      consByKey.set(buildHourKey(pt.datetime), pt.consumptionKw);
+      consByHour.set(new Date(pt.datetime).getHours(), pt.consumptionKw);
+    });
+
+    return base.map((p) => {
+      const key = buildHourKey(p.timestamp);
+      const consumption = appliancePts.length > 0
+        ? (consByKey.get(key) ?? consByHour.get(p.hour) ?? p.expectedConsumption)
+        : p.expectedConsumption;
+      return {
+        ...p,
+        expectedProduction: prodByHour.get(p.hour) ?? p.expectedProduction,
+        expectedConsumption: consumption,
+      };
+    });
   }, [data]);
-  const slicedPredictions = useMemo(() => predictions.slice(0, 12), [predictions]);
+  const maxHours = predictions.length;
+  const effectiveEnd = Math.min(rangeEnd, maxHours);
+  const effectiveStart = Math.min(rangeStart, Math.max(0, effectiveEnd - intervalH));
+  const slicedPredictions = useMemo(
+    () => predictions.slice(effectiveStart, effectiveEnd),
+    [predictions, effectiveStart, effectiveEnd],
+  );
+  const aggregatedPredictions = useMemo(
+    () => aggregatePredictions(slicedPredictions, intervalH),
+    [slicedPredictions, intervalH],
+  );
 
   const simPoints = useMemo(
-    () => simulate(chargeLevel, capacityKwh, slicedPredictions, consumptionReduction, productionBoost),
-    [chargeLevel, capacityKwh, slicedPredictions, consumptionReduction, productionBoost],
+    () => simulate(chargeLevel, capacityKwh, aggregatedPredictions, consumptionReduction, productionBoost, intervalH),
+    [chargeLevel, capacityKwh, aggregatedPredictions, consumptionReduction, productionBoost, intervalH],
   );
 
   const status = statusOf(chargeLevel);
@@ -400,12 +466,66 @@ export default function SimuladorBateriaPage() {
                 </div>
               </Panel>
 
+              <Panel title="Rango e intervalo" icon={<Activity className="w-3.5 h-3.5 text-gray-400" />}>
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-xs font-medium text-gray-700">Desde</span>
+                      <span className="text-base font-bold tabular-nums text-blue-600">h+{rangeStart}</span>
+                    </div>
+                    <input
+                      type="range" min={0} max={Math.max(0, effectiveEnd - intervalH)} step={1}
+                      value={rangeStart}
+                      onChange={(e) => setRangeStart(Number(e.target.value))}
+                      className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-blue-500 bg-gray-200"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-xs font-medium text-gray-700">Hasta</span>
+                      <span className="text-base font-bold tabular-nums text-blue-600">
+                        h+{effectiveEnd}{effectiveEnd === 12 ? <span className="ml-1 text-[10px] font-semibold text-emerald-600">★ rec.</span> : null}
+                      </span>
+                    </div>
+                    <input
+                      type="range" min={Math.min(rangeStart + intervalH, maxHours)} max={48} step={1}
+                      value={effectiveEnd}
+                      onChange={(e) => setRangeEnd(Number(e.target.value))}
+                      className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-blue-500 bg-gray-200"
+                    />
+                    <p className="text-[11px] text-gray-400">{effectiveEnd - effectiveStart}h seleccionadas · máx. 48h · <button type="button" className="text-emerald-600 hover:underline" onClick={() => setRangeEnd(12)}>Rec. 12h</button></p>
+                  </div>
+                  <div className="border-t border-gray-100 pt-3 space-y-1.5">
+                    <span className="text-xs font-medium text-gray-700">Intervalo de visualización</span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {INTERVAL_OPTIONS.map((h) => (
+                        <button
+                          key={h}
+                          type="button"
+                          onClick={() => setIntervalH(h)}
+                          title={h === 2 ? 'Recomendado' : undefined}
+                          className={`px-2 py-0.5 text-[11px] font-semibold rounded transition-colors ${
+                            intervalH === h
+                              ? 'bg-emerald-500 text-white'
+                              : h === 2
+                              ? 'border border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                              : 'border border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          {h}h{h === 2 ? ' ★' : ''}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </Panel>
+
               <Panel title="Sistema" icon={<Info className="w-3.5 h-3.5 text-gray-400" />}>
                 <dl className="text-xs space-y-1.5">
                   <Item dt="Capacidad" dd={`${capacityKwh.toFixed(1)} kWh`} />
                   <Item dt="Módulos" dd={String(moduleCount)} />
                   <Item dt="Eficiencia" dd={`${CHARGE_EFFICIENCY * 100}%`} />
-                  <Item dt="Horizonte" dd={`${slicedPredictions.length} horas`} />
+                  <Item dt="Puntos" dd={`${aggregatedPredictions.length} (${intervalH}h c/u)`} />
                 </dl>
               </Panel>
             </aside>
@@ -530,7 +650,7 @@ export default function SimuladorBateriaPage() {
                     sub={
                       depletion.base
                         ? `Rango: ${depletion.pes ?? '—'} – ${depletion.opt ?? 'no se agota'}`
-                        : 'En las próximas 12 horas'
+                        : `En las próximas ${effectiveEnd - effectiveStart}h`
                     }
                     accent={depletion.base ? 'red' : 'emerald'}
                   />
@@ -543,7 +663,7 @@ export default function SimuladorBateriaPage() {
                   />
                   <KpiRow
                     icon={<Activity className="w-3.5 h-3.5 text-gray-500" />}
-                    label="Balance neto 12h"
+                    label={`Balance neto ${effectiveEnd - effectiveStart}h`}
                     value={`${totalBalance >= 0 ? '+' : ''}${totalBalance.toFixed(1)} kWh`}
                     sub="Producción − consumo"
                     accent={totalBalance >= 0 ? 'emerald' : 'red'}

@@ -11,6 +11,52 @@ gemelo_digital/
 
 ---
 
+## Arranque con Docker (recomendado)
+
+> Requiere **Docker** y **Docker Compose**. Levanta los cuatro servicios
+> (MongoDB, backend, frontend y clima mock) con un solo comando. No hace falta
+> instalar Python, Node ni MongoDB en la máquina.
+
+```bash
+# Desde la raíz del repositorio
+docker compose up --build
+```
+
+Esto construye y arranca:
+
+| Servicio | URL | Descripción |
+|----------|-----|-------------|
+| frontend   | http://localhost:3000         | Aplicación Next.js |
+| backend    | http://localhost:8000/graphql | API GraphQL + REST |
+| clima_mock | http://localhost:8001/docs    | Estación meteorológica mock (opcional) |
+| mongodb    | localhost:27017               | Base de datos (volumen persistente `mongodb_data`) |
+
+Comandos útiles:
+
+```bash
+docker compose up -d --build     # En segundo plano
+docker compose logs -f backend   # Ver logs de un servicio
+docker compose down              # Parar y eliminar contenedores
+docker compose down -v           # Además borra el volumen de MongoDB (datos)
+```
+
+> **Puertos:** los puertos `3000`, `8000`, `8001` y `27017` del host deben estar
+> libres. Si ya tienes algo corriendo en `8000`, ajusta el mapeo en
+> `docker-compose.yml` (y la variable `NEXT_PUBLIC_GRAPHQL_URL` / `NEXT_PUBLIC_API_URL`
+> del frontend, que se hornean en tiempo de build).
+
+> El secreto JWT se puede sobreescribir con la variable de entorno `JWT_SECRET`
+> al ejecutar `docker compose up` (por defecto usa un valor de desarrollo).
+
+---
+
+## Arranque manual
+
+Si prefieres correr los servicios sin Docker, sigue las secciones siguientes.
+Arrancarlos en el orden indicado.
+
+---
+
 ## 1. Backend principal (FastAPI + GraphQL)
 
 > Requiere **Python 3.11+** y **MongoDB** corriendo en `localhost:27017`.
