@@ -95,6 +95,7 @@ from app.services.consumption_profile_service import (
 )
 from app.services.battery_discharge_service import calculate_battery_discharge_time
 from app.services.invitation_service import create_invitation_code, list_invitation_codes
+from app.database import get_database
 import strawberry.types
 from app.auth import create_token, require_admin, require_auth
 from app.services.lectura_service import (
@@ -188,6 +189,7 @@ class WeatherDataType:
     lastUpdated: Optional[str]
     description: Optional[str]
     weatherCode: Optional[int]
+    sourceError: Optional[str]
 
 
 @strawberry.type
@@ -690,6 +692,7 @@ def _map_weather(data: dict) -> WeatherDataType:
         lastUpdated=data.get("lastUpdated"),
         description=data.get("description"),
         weatherCode=data.get("weatherCode"),
+        sourceError=data.get("sourceError"),
     )
 
 
