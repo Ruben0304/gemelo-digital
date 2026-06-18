@@ -13,7 +13,7 @@ interface WeatherTodayProps {
 
 export default function WeatherToday({ weather, onWeatherOverride }: WeatherTodayProps) {
   const [showModal, setShowModal] = useState(false);
-  const { temperature, solarRadiation, cloudCover, humidity, windSpeed } = weather;
+  const { temperature, solarRadiation, cloudCover, humidity, windSpeed, weatherCode } = weather;
   const locationLabel = weather.locationName ?? 'Ubicación';
 
   // Mapeo de animaciones Lottie
@@ -27,7 +27,14 @@ export default function WeatherToday({ weather, onWeatherOverride }: WeatherToda
 
   // Determinar qué animación usar según el clima actual
   const getLottieAnimation = (): LottieAnimationType => {
-    // Basado en la nubosidad reportada por la fuente meteorológica
+    if (weatherCode !== undefined) {
+      if (weatherCode >= 95) return 'rainy';          // tormentas
+      if (weatherCode >= 51) return 'rainy';          // lluvia/llovizna
+      if (weatherCode >= 45) return 'cloudy';         // niebla
+      if (weatherCode === 3)  return 'cloudy';
+      if (weatherCode === 2)  return 'partly-cloudy';
+      if (weatherCode <= 1)   return 'sunny';
+    }
     if (cloudCover < 20) return 'sunny';
     if (cloudCover < 50) return 'partly-cloudy';
     if (cloudCover < 80) return 'cloudy';
@@ -62,33 +69,26 @@ export default function WeatherToday({ weather, onWeatherOverride }: WeatherToda
 
   // Determinar calidad para generación fotovoltaica
   const getSolarQuality = () => {
-    // Basado en radiación solar y nubosidad
-    // Radiación óptima: >600 W/m², Nubosidad baja: <30%
-    const radiationScore = solarRadiation / 800; // Normalizado (800 W/m² = excelente)
-    const cloudScore = (100 - cloudCover) / 100; // Invertido (menos nubes = mejor)
-    const totalScore = (radiationScore * 0.7 + cloudScore * 0.3); // Radiación pesa más
+    // Código WMO ≥95 = tormenta, 51-67 = lluvia → forzar Bajo independientemente de la radiación
+    const isSevere = weatherCode !== undefined && weatherCode >= 95;
+    const isRainy  = weatherCode !== undefined && weatherCode >= 51 && weatherCode < 95;
+
+    if (isSevere) {
+      return { color: 'bg-red-500', text: 'Bajo', textColor: 'text-red-600', bgLight: 'bg-red-100/50' };
+    }
+
+    const radiationScore = solarRadiation / 800;
+    const cloudScore = (100 - cloudCover) / 100;
+    // Penalización adicional si llueve
+    const rainPenalty = isRainy ? 0.3 : 0;
+    const totalScore = (radiationScore * 0.7 + cloudScore * 0.3) - rainPenalty;
 
     if (totalScore >= 0.7) {
-      return {
-        color: 'bg-green-500',
-        text: 'Excelente',
-        textColor: 'text-green-600',
-        bgLight: 'bg-green-100/50'
-      };
+      return { color: 'bg-green-500', text: 'Excelente', textColor: 'text-green-600', bgLight: 'bg-green-100/50' };
     } else if (totalScore >= 0.4) {
-      return {
-        color: 'bg-yellow-500',
-        text: 'Moderado',
-        textColor: 'text-yellow-600',
-        bgLight: 'bg-yellow-100/50'
-      };
+      return { color: 'bg-yellow-500', text: 'Moderado', textColor: 'text-yellow-600', bgLight: 'bg-yellow-100/50' };
     } else {
-      return {
-        color: 'bg-red-500',
-        text: 'Bajo',
-        textColor: 'text-red-600',
-        bgLight: 'bg-red-100/50'
-      };
+      return { color: 'bg-red-500', text: 'Bajo', textColor: 'text-red-600', bgLight: 'bg-red-100/50' };
     }
   };
 
@@ -165,8 +165,8 @@ export default function WeatherToday({ weather, onWeatherOverride }: WeatherToda
 
       {/* Modal con detalles */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => setShowModal(false)}>
-          <div className="bg-white/95 backdrop-blur-xl rounded-3xl p-6 max-w-md w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center px-4 pt-4 pb-28 sm:p-4 bg-black/40 backdrop-blur-sm" onClick={() => setShowModal(false)}>
+          <div className="bg-white/95 backdrop-blur-xl rounded-3xl p-6 max-w-md w-full shadow-2xl max-h-full overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             {/* Header del modal */}
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-xl font-bold text-gray-900">Detalles del clima</h3>
