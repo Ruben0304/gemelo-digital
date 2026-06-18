@@ -31,13 +31,6 @@ from app.services.inverter_service import (
     list_inverters,
     update_inverter,
 )
-from app.services.blackout_service import (
-    delete_blackout,
-    get_blackout,
-    list_blackouts,
-    save_blackout_schedule,
-    update_blackout_schedule,
-)
 from app.services.panel_service import (
     create_panel,
     delete_panel,
@@ -186,6 +179,7 @@ class WeatherDataType:
     locationName: Optional[str]
     lastUpdated: Optional[str]
     description: Optional[str]
+    weatherCode: Optional[int]
 
 
 @strawberry.type
@@ -299,23 +293,12 @@ class SolarSnapshot:
 
 
 @strawberry.type
-class BlackoutImpactType:
-    intervalStart: str
-    intervalEnd: str
-    loadFactor: float
-    productionFactor: float
-    intensity: str
-    note: Optional[str]
-
-
-@strawberry.type
 class PredictionType:
     timestamp: str
     hour: int
     expectedProduction: float
     expectedConsumption: float
     confidence: float
-    blackoutImpact: Optional[BlackoutImpactType]
 
 
 @strawberry.type
@@ -328,25 +311,6 @@ class AlertType:
 
 
 @strawberry.type
-class BlackoutIntervalType:
-    start: str
-    end: str
-    durationMinutes: Optional[int]
-
-
-@strawberry.type
-class BlackoutType:
-    id_: str = strawberry.field(name="_id")
-    date: str
-    intervals: List[BlackoutIntervalType]
-    province: Optional[str]
-    municipality: Optional[str]
-    notes: Optional[str]
-    createdAt: Optional[str]
-    updatedAt: Optional[str]
-
-
-@strawberry.type
 class PredictionsPayload:
     predictions: List[PredictionType]
     alerts: List[AlertType]
@@ -356,7 +320,6 @@ class PredictionsPayload:
     weather: WeatherDataType
     timestamp: str
     config: SystemConfigType
-    blackouts: List[BlackoutType]
 
 
 @strawberry.type
@@ -678,6 +641,7 @@ def _map_weather(data: dict) -> WeatherDataType:
         locationName=data.get("locationName"),
         lastUpdated=data.get("lastUpdated"),
         description=data.get("description"),
+        weatherCode=data.get("weatherCode"),
     )
 
 
@@ -791,19 +755,6 @@ def _map_system_config(config: dict) -> SystemConfigType:
         spec=battery_spec,
     )
     return SystemConfigType(location=location, solar=solar, battery=battery)
-
-
-def _map_blackout(data: dict) -> BlackoutType:
-    return BlackoutType(
-        id_=data["_id"],
-        date=data["date"],
-        intervals=[BlackoutIntervalType(**interval) for interval in data.get("intervals", [])],
-        province=data.get("province"),
-        municipality=data.get("municipality"),
-        notes=data.get("notes"),
-        createdAt=data.get("createdAt"),
-        updatedAt=data.get("updatedAt"),
-    )
 
 
 def _map_user(data: dict) -> UserType:
@@ -948,15 +899,7 @@ class Query:
     async def predictions(self) -> PredictionsPayload:
         data = await get_predictions_bundle()
         return PredictionsPayload(
-            predictions=[
-                PredictionType(
-                    **prediction,
-                    blackoutImpact=BlackoutImpactType(**prediction["blackoutImpact"])
-                    if prediction.get("blackoutImpact")
-                    else None,
-                )
-                for prediction in data["predictions"]
-            ],
+            predictions=[PredictionType(**prediction) for prediction in data["predictions"]],
             alerts=[AlertType(**alert) for alert in data["alerts"]],
             recommendations=data["recommendations"],
             battery=_map_battery_status(data["battery"]),
@@ -964,7 +907,6 @@ class Query:
             weather=_map_weather(data["weather"]),
             timestamp=data["timestamp"],
             config=_map_system_config(data["config"]),
-            blackouts=[_map_blackout(item) for item in data["blackouts"]],
         )
 
     @strawberry.field
@@ -1067,16 +1009,6 @@ class Query:
     def inverter(self, id: str) -> Optional[InverterType]:
         inverter = get_inverter(id)
         return _map_inverter(inverter) if inverter else None
-
-    @strawberry.field
-    def blackouts(
-        self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        limit: Optional[int] = None,
-    ) -> List[BlackoutType]:
-        items = list_blackouts(start_date, end_date, limit)
-        return [_map_blackout(item) for item in items]
 
     @strawberry.field
     async def ml_predict(
@@ -1649,21 +1581,6 @@ class ApplianceInput:
 
 
 @strawberry.input
-class BlackoutIntervalInput:
-    start: str
-    end: str
-
-
-@strawberry.input
-class BlackoutInput:
-    date: str
-    intervals: List[BlackoutIntervalInput]
-    province: Optional[str] = None
-    municipality: Optional[str] = None
-    notes: Optional[str] = None
-
-
-@strawberry.input
 class RegisterInput:
     email: str
     password: str
@@ -1849,37 +1766,6 @@ class Mutation:
         require_admin(info.context)
         return delete_inverter(id)
 
-    @strawberry.mutation(name="createBlackout")
-    def create_blackout_mutation(self, info: strawberry.types.Info, input: BlackoutInput) -> BlackoutType:
-        require_admin(info.context)
-        payload = {
-            "date": input.date,
-            "intervals": [interval.__dict__ for interval in input.intervals],
-            "province": input.province,
-            "municipality": input.municipality,
-            "notes": input.notes,
-        }
-        blackout = save_blackout_schedule(payload)
-        return _map_blackout(blackout)
-
-    @strawberry.mutation(name="updateBlackout")
-    def update_blackout_mutation(self, info: strawberry.types.Info, id: str, input: BlackoutInput) -> BlackoutType:
-        require_admin(info.context)
-        payload = {
-            "date": input.date,
-            "intervals": [interval.__dict__ for interval in input.intervals],
-            "province": input.province,
-            "municipality": input.municipality,
-            "notes": input.notes,
-        }
-        blackout = update_blackout_schedule(id, payload)
-        return _map_blackout(blackout)
-
-    @strawberry.mutation(name="deleteBlackout")
-    def delete_blackout_mutation(self, info: strawberry.types.Info, id: str) -> bool:
-        require_admin(info.context)
-        return delete_blackout(id)
-
     @strawberry.mutation(name="registerUser")
     def register_user_mutation(self, info: strawberry.types.Info, input: RegisterInput) -> AuthPayloadType:
         import uuid
@@ -2042,7 +1928,7 @@ class Mutation:
     def reset_system_data_mutation(self, info: strawberry.types.Info) -> bool:
         """
         Borra toda la configuración del sistema (paneles, baterías, inversores,
-        electrodomésticos, apagones, ubicación y perfil de consumo) para permitir
+        electrodomésticos, ubicación y perfil de consumo) para permitir
         volver a ejecutar el asistente de configuración. Solo administradores.
         """
         require_admin(info.context)
@@ -2051,7 +1937,6 @@ class Mutation:
         db["baterias"].delete_many({})
         db["inversores"].delete_many({})
         db["electrodomesticos"].delete_many({})
-        db["apagones"].delete_many({})
         db["ubicacion_config"].delete_many({})
         db["consumption_profiles"].delete_many({})
         db["shadow_profile"].delete_many({})

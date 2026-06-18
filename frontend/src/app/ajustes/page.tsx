@@ -148,7 +148,7 @@ export default function AjustesHomePage() {
             <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
               <p className="mb-3 text-sm font-medium text-red-800">
                 ¿Confirmar restablecimiento? Se eliminarán paneles, baterías, inversores,
-                electrodomésticos, apagones y la configuración de ubicación. Los usuarios y
+                electrodomésticos y la configuración de ubicación. Los usuarios y
                 lecturas históricas se conservarán.
               </p>
               <div className="flex gap-2">

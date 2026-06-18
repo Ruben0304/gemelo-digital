@@ -86,7 +86,6 @@ export const PREDICTIONS_QUERY = `
         consumptionKwh
         batteryLevel
         confidence
-        hasBlackout
         weatherCondition
       }
       alerts {
@@ -258,25 +257,6 @@ export const APPLIANCE_QUERY = `
   }
 `
 
-export const BLACKOUTS_QUERY = `
-  query Blackouts($startDate: String, $endDate: String) {
-    blackouts(startDate: $startDate, endDate: $endDate) {
-      _id
-      date
-      intervals {
-        start
-        end
-        durationMinutes
-      }
-      province
-      municipality
-      notes
-      createdAt
-      updatedAt
-    }
-  }
-`
-
 // ============================================================================
 // Mutations
 // ============================================================================
@@ -424,42 +404,6 @@ export const UPDATE_APPLIANCE_MUTATION = `
 export const DELETE_APPLIANCE_MUTATION = `
   mutation DeleteAppliance($id: String!) {
     deleteAppliance(id: $id)
-  }
-`
-
-export const CREATE_BLACKOUT_MUTATION = `
-  mutation CreateBlackout($input: BlackoutInput!) {
-    createBlackout(input: $input) {
-      _id
-      date
-      intervals {
-        start
-        end
-        durationMinutes
-      }
-      createdAt
-    }
-  }
-`
-
-export const UPDATE_BLACKOUT_MUTATION = `
-  mutation UpdateBlackout($id: String!, $input: BlackoutInput!) {
-    updateBlackout(id: $id, input: $input) {
-      _id
-      date
-      intervals {
-        start
-        end
-        durationMinutes
-      }
-      updatedAt
-    }
-  }
-`
-
-export const DELETE_BLACKOUT_MUTATION = `
-  mutation DeleteBlackout($id: String!) {
-    deleteBlackout(id: $id)
   }
 `
 

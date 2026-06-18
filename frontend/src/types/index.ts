@@ -22,6 +22,7 @@ export interface WeatherData {
   locationName?: string;   // Friendly location name
   lastUpdated?: string;    // ISO string for data timestamp
   description?: string;    // Textual weather summary
+  weatherCode?: number;    // WMO weather code
 }
 
 export interface DayForecast {
@@ -73,7 +74,7 @@ export interface Prediction {
   expectedProduction: number; // kWh
   expectedConsumption: number; // kWh
   confidence: number;        // % - Prediction confidence
-  blackoutImpact?: BlackoutImpact;
+
 }
 
 export interface Alert {
@@ -220,23 +221,6 @@ export interface DailySummary {
   readingCount: number;
 }
 
-export interface BlackoutInterval {
-  start: string;
-  end: string;
-  durationMinutes?: number;
-}
-
-export interface BlackoutSchedule {
-  _id?: string;
-  date: string; // ISO date (00:00:00 local)
-  intervals: BlackoutInterval[];
-  province?: string;
-  municipality?: string;
-  notes?: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
 export interface ConsumptionProfile {
   _id?: string | null;
   name: string;
@@ -258,11 +242,3 @@ export interface ConsumptionPrediction {
   isWeekend: boolean;
 }
 
-export interface BlackoutImpact {
-  intervalStart: string;
-  intervalEnd: string;
-  loadFactor: number;
-  productionFactor: number;
-  intensity: 'moderado' | 'severo';
-  note?: string;
-}

@@ -1077,7 +1077,7 @@ function BatteryContent({
       <StepHeader
         eyebrow="Paso 3 de 4"
         title="Sistema de almacenamiento"
-        description="La capacidad total del banco de baterías determina la autonomía del sistema durante períodos sin radiación solar o apagones."
+        description="La capacidad total del banco de baterías determina la autonomía del sistema durante períodos sin radiación solar."
       />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>

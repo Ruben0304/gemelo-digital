@@ -21,7 +21,6 @@ import {
   Alert,
   SystemConfig,
   User,
-  BlackoutSchedule,
   SolarPanelConfig,
   BatteryConfig,
   InverterConfig,
@@ -96,6 +95,7 @@ const DASHBOARD_QUERY = `
         locationName
         lastUpdated
         description
+        weatherCode
         forecast {
           date
           dayOfWeek
@@ -176,14 +176,6 @@ const DASHBOARD_QUERY = `
         expectedProduction
         expectedConsumption
         confidence
-        blackoutImpact {
-          intervalStart
-          intervalEnd
-          loadFactor
-          productionFactor
-          intensity
-          note
-        }
       }
       alerts {
         id
@@ -224,6 +216,7 @@ const DASHBOARD_QUERY = `
         locationName
         lastUpdated
         description
+        weatherCode
         forecast {
           date
           dayOfWeek
@@ -255,20 +248,6 @@ const DASHBOARD_QUERY = `
           dischargeRateKw
           efficiencyPercent
         }
-      }
-      blackouts {
-        _id
-        date
-        intervals {
-          start
-          end
-          durationMinutes
-        }
-        province
-        municipality
-        notes
-        createdAt
-        updatedAt
       }
     }
     panels {
@@ -361,7 +340,7 @@ type DashboardQueryResult = {
     weather: WeatherData;
     timestamp: string;
     config: SystemConfig;
-    blackouts: BlackoutSchedule[];
+
   };
   panels: SolarPanelConfig[];
   batteries: BatteryConfig[];
@@ -539,7 +518,6 @@ const DEMO_DATA: DashboardQueryResult = {
     },
     timestamp: new Date().toISOString(),
     config: DEFAULT_SYSTEM_CONFIG,
-    blackouts: [],
   },
   panels: [],
   batteries: [],
@@ -652,7 +630,6 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     timeline: SolarData[];
     weather?: WeatherData;
     config: SystemConfig;
-    blackouts?: BlackoutSchedule[];
   } | null>(null);
 
   const [mlPredictions, setMlPredictions] = useState<SolarData[]>([]);
@@ -1119,7 +1096,6 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                 weather={weatherData}
                 batteryProjection={predictionsData.battery}
                 config={solarData.config}
-                blackouts={predictionsData.blackouts}
                 consumptionPredictions={consumptionPredictions}
                 solarModelR2={solarModelR2}
               />

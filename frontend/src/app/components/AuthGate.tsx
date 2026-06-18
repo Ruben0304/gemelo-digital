@@ -249,7 +249,7 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
                   Gemelo Digital Fotovoltaico
                 </h1>
                 <p className="text-sm text-white/70 leading-relaxed">
-                  Monitoreo en tiempo real, predicción de generación y consumo, y análisis de apagones para la microrred solar.
+                  Monitoreo en tiempo real, predicción de generación y consumo para la microrred solar.
                 </p>
               </div>
 
@@ -337,7 +337,7 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
                 <h2 className="text-3xl font-semibold text-slate-900">{title}</h2>
                 <p className="text-sm text-slate-500">
                   {isRegister
-                    ? 'Cree su cuenta de operador para planificar mantenimientos, supervisar baterías y responder a apagones.'
+                    ? 'Cree su cuenta de operador para planificar mantenimientos y supervisar el estado del sistema.'
                     : isLdap
                       ? 'Autenticación contra el directorio corporativo. En su primer ingreso necesitará el código de invitación del administrador.'
                       : 'Ingrese con sus credenciales o utilice datos demo para explorar el gemelo digital.'}

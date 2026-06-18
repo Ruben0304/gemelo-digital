@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import type { Prediction, BatteryStatus, DayForecast, BlackoutSchedule } from '@/types'
+import type { Prediction, BatteryStatus, DayForecast } from '@/types'
 import {
   predictProduction,
-  applyBlackoutAdjustments,
   generateAlerts,
   generateHourlyPredictions,
 } from '../predictions'
@@ -43,16 +42,6 @@ const makeForecast = (overrides: Partial<DayForecast> = {}): DayForecast => ({
   ...overrides,
 } as unknown as DayForecast)
 
-// Blackout que cubre 10:00–13:00 UTC el 2024-06-15
-const makeBlackout = (): BlackoutSchedule => ({
-  date: '2024-06-15',
-  intervals: [{
-    start: '2024-06-15T10:00:00+00:00',
-    end:   '2024-06-15T13:00:00+00:00',
-    durationMinutes: 180,
-  }],
-} as unknown as BlackoutSchedule)
-
 // ─────────────────────────────────────────────────────────────────
 // predictProduction
 // ─────────────────────────────────────────────────────────────────
@@ -89,80 +78,6 @@ describe('predictProduction', () => {
 
   it('retorna valor no negativo siempre', () => {
     expect(predictProduction(0, 50, 100, 13, makeContext())).toBeGreaterThanOrEqual(0)
-  })
-})
-
-// ─────────────────────────────────────────────────────────────────
-// applyBlackoutAdjustments
-// ─────────────────────────────────────────────────────────────────
-describe('applyBlackoutAdjustments', () => {
-  it('devuelve predicciones sin cambios si no hay apagones', () => {
-    const predictions = [makePrediction()]
-    const result = applyBlackoutAdjustments(predictions, [])
-    expect(result).toEqual(predictions)
-  })
-
-  it('reduce producción al 85 % durante un apagón', () => {
-    // Predicción dentro del apagón (11:00 UTC)
-    const prediction = makePrediction({
-      timestamp: '2024-06-15T11:00:00+00:00',
-      hour: 11,
-      expectedProduction: 20,
-    })
-    const result = applyBlackoutAdjustments([prediction], [makeBlackout()])
-    expect(result[0].expectedProduction).toBeCloseTo(17, 1) // 20 × 0.85
-  })
-
-  it('reduce consumo al 60 % durante un apagón', () => {
-    const prediction = makePrediction({
-      timestamp: '2024-06-15T11:00:00+00:00',
-      hour: 11,
-      expectedConsumption: 30,
-    })
-    const result = applyBlackoutAdjustments([prediction], [makeBlackout()])
-    expect(result[0].expectedConsumption).toBeCloseTo(18, 1) // 30 × 0.60
-  })
-
-  it('penaliza la confianza en -12 puntos durante apagón', () => {
-    const prediction = makePrediction({
-      timestamp: '2024-06-15T11:00:00+00:00',
-      hour: 11,
-      confidence: 85,
-    })
-    const result = applyBlackoutAdjustments([prediction], [makeBlackout()])
-    expect(result[0].confidence).toBe(73) // 85 - 12
-  })
-
-  it('no modifica predicciones fuera del intervalo del apagón', () => {
-    const prediction = makePrediction({
-      timestamp: '2024-06-15T08:00:00+00:00',
-      hour: 8,
-      expectedProduction: 25,
-    })
-    const result = applyBlackoutAdjustments([prediction], [makeBlackout()])
-    expect(result[0].expectedProduction).toBe(25)
-    expect(result[0].blackoutImpact).toBeUndefined()
-  })
-
-  it('adjunta blackoutImpact a predicciones afectadas', () => {
-    const prediction = makePrediction({
-      timestamp: '2024-06-15T11:00:00+00:00',
-      hour: 11,
-    })
-    const result = applyBlackoutAdjustments([prediction], [makeBlackout()])
-    expect(result[0].blackoutImpact).toBeDefined()
-    expect(result[0].blackoutImpact!.loadFactor).toBe(0.6)
-    expect(result[0].blackoutImpact!.productionFactor).toBe(0.85)
-  })
-
-  it('la confianza no baja de 40 (límite mínimo)', () => {
-    const prediction = makePrediction({
-      timestamp: '2024-06-15T11:00:00+00:00',
-      hour: 11,
-      confidence: 50, // 50 - 12 = 38 → debe ser 40
-    })
-    const result = applyBlackoutAdjustments([prediction], [makeBlackout()])
-    expect(result[0].confidence).toBe(40)
   })
 })
 

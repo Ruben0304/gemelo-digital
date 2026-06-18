@@ -1071,7 +1071,7 @@ export default function DevicesView({
             </p>
             <p className="mt-1 max-w-md text-sm text-slate-500">
               Añada una o varias configuraciones de almacenamiento para modelar la autonomía del
-              sistema frente a apagones o días nublados.
+              sistema frente a días nublados o períodos sin radiación solar.
             </p>
             <button
               type="button"
