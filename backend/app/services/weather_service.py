@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 from .system_defaults import DEFAULT_SYSTEM_CONFIG
-from .weather_source_service import get_active_weather_data
+from .weather_source_service import get_active_weather_data, get_active_weather_source
 
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 OPENMETEO_BASE_URL = "https://api.open-meteo.com/v1/forecast"
@@ -353,16 +353,24 @@ async def get_weather_with_fallback(
     capacity_kw: float,
     location_name: str = "Ubicación",
 ) -> Dict[str, Any]:
-    try:
-        custom_weather = await get_active_weather_data(lat, lon, capacity_kw, location_name)
-        if custom_weather:
-            return custom_weather
-    except Exception:
-        # Si falla la fuente configurable, continúa con fallback estándar.
-        pass
+    source_error: Optional[str] = None
+
+    active_source = get_active_weather_source()
+    if active_source and active_source.get("enabled"):
+        # Hay una fuente configurada: cualquier fallo debe ser visible al operador.
+        source_name = active_source.get("name", "fuente personalizada")
+        try:
+            custom_weather = await get_active_weather_data(lat, lon, capacity_kw, location_name)
+            if custom_weather:
+                return custom_weather
+        except Exception as exc:
+            source_error = f"La fuente '{source_name}' falló: {exc}"
 
     try:
-        return await fetch_open_meteo_weather(lat, lon, capacity_kw, location_name)
+        weather = await fetch_open_meteo_weather(lat, lon, capacity_kw, location_name)
+        if source_error:
+            weather["sourceError"] = source_error
+        return weather
     except Exception:
         mock_weather = _generate_fallback_weather_data(capacity_kw)
         mock_weather.update(
@@ -372,4 +380,6 @@ async def get_weather_with_fallback(
                 "lastUpdated": datetime.utcnow().isoformat(),
             }
         )
+        if source_error:
+            mock_weather["sourceError"] = source_error
         return mock_weather
