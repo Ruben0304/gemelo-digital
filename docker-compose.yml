@@ -1,0 +1,44 @@
+services:
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: GemeloDigitalCujai
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017/GemeloDigitalCujai
+      MONGODB_DB: GemeloDigitalCujai
+      CORS_ORIGINS: http://localhost:3000
+      JWT_SECRET: ${JWT_SECRET:-gemelo-digital-cujae-secret-key-2024}
+      LDAP_ENABLED: "false"
+    depends_on:
+      - mongodb
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_GRAPHQL_URL: http://localhost:8000/graphql
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+  clima_mock:
+    build: ./servidor_clima_mock
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+
+volumes:
+  mongodb_data:
