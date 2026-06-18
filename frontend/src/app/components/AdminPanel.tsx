@@ -134,8 +134,13 @@ export default function AdminPanel({ currentUser, onBack, onLogout }: AdminPanel
 
     const handleRevokeSession = async (id: string) => {
         setRevokingId(id);
+        const isOwn = sessions.find((s) => s._id === id)?.email === currentUser.email;
         try {
             await executeMutation(REVOKE_SESSION_MUTATION, { id });
+            if (isOwn) {
+                onLogout?.();
+                return;
+            }
             setSessions((prev) => prev.filter((s) => s._id !== id));
         } catch (err) {
             console.error('Error al revocar sesión:', err);
@@ -342,7 +347,14 @@ export default function AdminPanel({ currentUser, onBack, onLogout }: AdminPanel
                         <tbody className="divide-y divide-slate-200 bg-white">
                             {sessions.map((s) => (
                                 <tr key={s._id} className="hover:bg-slate-50/50">
-                                    <td className="px-4 py-3 font-medium text-slate-900">{s.email}</td>
+                                    <td className="px-4 py-3 font-medium text-slate-900">
+                                        <span className="flex items-center gap-2">
+                                            {s.email}
+                                            {s.email === currentUser.email && (
+                                                <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">tú</span>
+                                            )}
+                                        </span>
+                                    </td>
                                     <td className="px-4 py-3 font-mono text-xs text-slate-600">{s.ip || '—'}</td>
                                     <td className="px-4 py-3">
                                         <span className="inline-flex items-center gap-1.5 text-slate-600">

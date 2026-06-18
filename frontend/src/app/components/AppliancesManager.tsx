@@ -1,9 +1,15 @@
 'use client';
 
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
-import { Clock3, FileSpreadsheet, LineChart, Pencil, Plus, Trash, Upload, X, Zap } from 'lucide-react';
-import type { ApplianceConfig, ApplianceMode, InverterConfig, SystemConfig } from '@/types';
-import { executeMutation } from '@/lib/graphql-client';
+import { Activity, Clock3, Layers, LineChart, Pencil, PenLine, Plus, Trash, Upload, X, Zap } from 'lucide-react';
+import type { ApplianceConfig, ApplianceBatch, ApplianceMode, BatchPreview, InverterConfig, SystemConfig } from '@/types';
+import { executeMutation, executeQuery } from '@/lib/graphql-client';
+import {
+  APPLIANCE_BATCHES_QUERY,
+  PREVIEW_APPLIANCE_BATCH_MUTATION,
+  UPLOAD_APPLIANCE_BATCH_MUTATION,
+  DELETE_APPLIANCE_BATCH_MUTATION,
+} from '@/lib/graphql-queries';
 import ConfirmDialog from './ConfirmDialog';
 
 interface AppliancesManagerProps {
@@ -26,10 +32,6 @@ interface ApplianceFormState {
   activeHours: string;
   selectedModeIndex: string;
   modes: ApplianceMode[];
-  alwaysOn: boolean;
-  measurementFile: File | null;
-  measurementMeta?: ApplianceConfig['measurementMeta'];
-  hasProfile: boolean;
 }
 
 const CREATE_APPLIANCE_MUTATION = `
@@ -50,20 +52,6 @@ const DELETE_APPLIANCE_MUTATION = `
   }
 `;
 
-const UPLOAD_MEASUREMENT_MUTATION = `
-  mutation UploadApplianceMeasurement($id: String!, $fileContent: String!) {
-    uploadApplianceMeasurement(id: $id, fileContent: $fileContent) {
-      _id
-      measurementMeta { samples avgKw minKw maxKw hoursCovered firstDate lastDate }
-    }
-  }
-`;
-
-const CLEAR_MEASUREMENT_MUTATION = `
-  mutation ClearApplianceMeasurement($id: String!) {
-    clearApplianceMeasurement(id: $id) { _id }
-  }
-`;
 
 const emptyForm: ApplianceFormState = {
   name: '',
@@ -75,10 +63,6 @@ const emptyForm: ApplianceFormState = {
   activeHours: '',
   selectedModeIndex: '',
   modes: [],
-  alwaysOn: true,
-  measurementFile: null,
-  measurementMeta: null,
-  hasProfile: false,
 };
 
 const parseNumber = (value: string): number | undefined => {
@@ -108,10 +92,6 @@ const toFormState = (appliance: ApplianceConfig): ApplianceFormState => ({
   selectedModeIndex:
     appliance.selectedModeIndex !== undefined ? appliance.selectedModeIndex.toString() : '',
   modes: appliance.modes ?? [],
-  alwaysOn: appliance.alwaysOn ?? true,
-  measurementFile: null,
-  measurementMeta: appliance.measurementMeta ?? null,
-  hasProfile: !!appliance.measurementMeta,
 });
 
 const readFileAsText = (file: File): Promise<string> =>
@@ -121,6 +101,7 @@ const readFileAsText = (file: File): Promise<string> =>
     reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
     reader.readAsText(file);
   });
+
 
 function applianceKey(appliance: ApplianceConfig, index: number): string {
   return appliance._id ?? `${appliance.name}-${index}`;
@@ -143,8 +124,35 @@ export default function AppliancesManager({
   const [modalMessage, setModalMessage] = useState<StatusMessage>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
+  const [dataMode, setDataMode] = useState<'manual' | 'mediciones'>('manual');
   const [form, setForm] = useState<ApplianceFormState>(emptyForm);
   const [loading, setLoading] = useState(false);
+
+  // Batch state
+  const [batches, setBatches] = useState<ApplianceBatch[]>([]);
+  const [batchesLoading, setBatchesLoading] = useState(false);
+  const [batchAddOpen, setBatchAddOpen] = useState(false);
+  const [batchFile, setBatchFile] = useState<File | null>(null);
+  const [batchPreview, setBatchPreview] = useState<BatchPreview | null>(null);
+  const [batchStartDate, setBatchStartDate] = useState('');
+  const [batchEndDate, setBatchEndDate] = useState('');
+  const [batchUploading, setBatchUploading] = useState(false);
+  const [batchMessage, setBatchMessage] = useState<StatusMessage>(null);
+
+  const loadBatches = async (applianceId: string) => {
+    setBatchesLoading(true);
+    try {
+      const result = await executeQuery<{ applianceBatches: ApplianceBatch[] }>(
+        APPLIANCE_BATCHES_QUERY,
+        { applianceId }
+      );
+      setBatches(result?.applianceBatches ?? []);
+    } catch {
+      setBatches([]);
+    } finally {
+      setBatchesLoading(false);
+    }
+  };
 
   const [newModeName, setNewModeName] = useState('');
   const [newModeAveragePowerW, setNewModeAveragePowerW] = useState('');
@@ -194,11 +202,6 @@ export default function AppliancesManager({
 
     appliances.forEach((appliance, index) => {
       const key = applianceKey(appliance, index);
-      // El sumario sólo considera equipos marcados como "siempre encendido"
-      // (que es el estado real persistido). Los modales y la edición permiten
-      // cambiarlo por electrodoméstico.
-      if (!(appliance.alwaysOn ?? true)) return;
-
       const mode = resolveMode(appliance, selectedModeByKey[key]);
       const quantity = appliance.quantity ?? 1;
       const effectiveAverage = mode?.averagePowerW ?? appliance.averagePowerW;
@@ -233,6 +236,19 @@ export default function AppliancesManager({
     setNewModeName('');
     setNewModeAveragePowerW('');
     setNewModeMaxPowerW('');
+    // Detect data mode from existing appliance
+    setDataMode(appliance?.measurementMeta ? 'mediciones' : 'manual');
+    // Reset batch state
+    setBatches([]);
+    setBatchAddOpen(false);
+    setBatchFile(null);
+    setBatchPreview(null);
+    setBatchStartDate('');
+    setBatchEndDate('');
+    setBatchMessage(null);
+    if (mode === 'edit' && appliance?._id) {
+      loadBatches(appliance._id);
+    }
     setModalOpen(true);
   };
 
@@ -270,13 +286,11 @@ export default function AppliancesManager({
   };
 
   const buildPayload = (state: ApplianceFormState) => {
-    const hasFileOrProfile = !!state.measurementFile || state.hasProfile;
-    const fallbackPower = hasFileOrProfile ? 0.0001 : undefined;
     return cleanPayload({
       name: state.name.trim(),
       category: state.category.trim() || undefined,
-      averagePowerW: parseNumber(state.averagePowerW) ?? fallbackPower,
-      maxPowerW: parseNumber(state.maxPowerW) ?? fallbackPower,
+      averagePowerW: parseNumber(state.averagePowerW),
+      maxPowerW: parseNumber(state.maxPowerW),
       measuredPowerW: parseNumber(state.measuredPowerW),
       quantity: parseNumber(state.quantity),
       activeHours: parseNumber(state.activeHours),
@@ -289,7 +303,6 @@ export default function AppliancesManager({
           maxPowerW: mode.maxPowerW,
         })
       ),
-      alwaysOn: state.alwaysOn,
     });
   };
 
@@ -313,22 +326,11 @@ export default function AppliancesManager({
         applianceId = created?.createAppliance?._id;
       }
 
-      let measurementNote = '';
-      if (form.measurementFile && applianceId) {
-        const fileContent = await readFileAsText(form.measurementFile);
-        await executeMutation(UPLOAD_MEASUREMENT_MUTATION, {
-          id: applianceId,
-          fileContent,
-        });
-        measurementNote = ' Perfil de consumo generado a partir del archivo.';
-      }
-
       setMessage({
         type: 'success',
-        text:
-          (form._id
-            ? 'Electrodoméstico actualizado correctamente.'
-            : 'Electrodoméstico creado correctamente.') + measurementNote,
+        text: form._id
+          ? 'Electrodoméstico actualizado correctamente.'
+          : 'Electrodoméstico creado correctamente.',
       });
       setModalOpen(false);
       setForm(emptyForm);
@@ -490,11 +492,6 @@ export default function AppliancesManager({
                         {appliance.category || 'General'} • Cantidad: {appliance.quantity}
                       </p>
                       <div className="mt-1 flex flex-wrap gap-1.5">
-                        {(appliance.alwaysOn ?? true) && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                            Siempre encendido
-                          </span>
-                        )}
                         {!!appliance.measurementMeta && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
                             <LineChart className="h-3 w-3" />
@@ -605,10 +602,10 @@ export default function AppliancesManager({
             <div className="flex items-start justify-between border-b border-slate-100 px-6 py-5">
               <div>
                 <h3 className="text-xl font-semibold text-slate-900">
-                  {modalMode === 'edit' ? 'Editar electrodoméstico' : 'Nuevo electrodoméstico'}
+                  {modalMode === 'edit' ? 'Editar equipo' : 'Nuevo equipo'}
                 </h3>
                 <p className="mt-1 text-sm text-slate-500">
-                  Defina consumo promedio/máximo y modos opcionales por equipo.
+                  {modalMode === 'edit' ? form.name : 'Selecciona cómo se registrará el consumo'}
                 </p>
               </div>
               <button
@@ -634,7 +631,63 @@ export default function AppliancesManager({
                 </div>
               )}
 
+              {/* ── Selector de modo ─────────────────────────────────────── */}
+              <div className="mb-5 grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDataMode('manual')}
+                  className={`flex flex-col items-start gap-2 rounded-2xl border-2 p-4 text-left transition-all ${
+                    dataMode === 'manual'
+                      ? 'border-amber-400 bg-amber-50 shadow-sm'
+                      : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className={`rounded-xl p-2 ${dataMode === 'manual' ? 'bg-amber-100' : 'bg-slate-100'}`}>
+                    <PenLine className={`h-4 w-4 ${dataMode === 'manual' ? 'text-amber-600' : 'text-slate-500'}`} />
+                  </span>
+                  <div>
+                    <p className={`text-sm font-semibold ${dataMode === 'manual' ? 'text-amber-900' : 'text-slate-700'}`}>
+                      Manual
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500 leading-snug">
+                      Potencia estimada y horas de uso
+                    </p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDataMode('mediciones')}
+                  className={`flex flex-col items-start gap-2 rounded-2xl border-2 p-4 text-left transition-all ${
+                    dataMode === 'mediciones'
+                      ? 'border-sky-400 bg-sky-50 shadow-sm'
+                      : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className={`rounded-xl p-2 ${dataMode === 'mediciones' ? 'bg-sky-100' : 'bg-slate-100'}`}>
+                    <Activity className={`h-4 w-4 ${dataMode === 'mediciones' ? 'text-sky-600' : 'text-slate-500'}`} />
+                  </span>
+                  <div>
+                    <p className={`text-sm font-semibold ${dataMode === 'mediciones' ? 'text-sky-900' : 'text-slate-700'}`}>
+                      Mediciones reales
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500 leading-snug">
+                      Datos del analizador de red
+                    </p>
+                  </div>
+                </button>
+              </div>
+
+              {/* ── Badge de compatibilidad ───────────────────────────────── */}
+              {dataMode === 'mediciones' && (
+                <div className="mb-5 flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700">
+                  <Activity className="h-3.5 w-3.5 shrink-0" />
+                  <span>Compatible con <strong>Hioki PW3360</strong> y analizadores de red con exportación TSV / XLS / CSV</span>
+                </div>
+              )}
+
               <form onSubmit={handleSubmit} className="space-y-5">
+                {/* ── Campos comunes ─────────────────────────────────────── */}
                 <div className="grid gap-4 sm:grid-cols-2">
                   <FormField label="Nombre" required>
                     <input
@@ -651,58 +704,6 @@ export default function AppliancesManager({
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                     />
                   </FormField>
-                  <FormField
-                    label={
-                      form.measurementFile || form.hasProfile
-                        ? 'Potencia promedio (W) — se calcula del archivo'
-                        : 'Potencia promedio (W)'
-                    }
-                    required={!form.measurementFile && !form.hasProfile}
-                  >
-                    <input
-                      required={!form.measurementFile && !form.hasProfile}
-                      disabled={!!form.measurementFile}
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      placeholder={form.measurementFile ? 'Se rellenará tras subir' : ''}
-                      value={form.averagePowerW}
-                      onChange={handleInput('averagePowerW')}
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-100 disabled:text-slate-400"
-                    />
-                  </FormField>
-                  <FormField
-                    label={
-                      form.measurementFile || form.hasProfile
-                        ? 'Potencia máxima (W) — se calcula del archivo'
-                        : 'Potencia máxima (W)'
-                    }
-                    required={!form.measurementFile && !form.hasProfile}
-                  >
-                    <input
-                      required={!form.measurementFile && !form.hasProfile}
-                      disabled={!!form.measurementFile}
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      placeholder={form.measurementFile ? 'Se rellenará tras subir' : ''}
-                      value={form.maxPowerW}
-                      onChange={handleInput('maxPowerW')}
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-100 disabled:text-slate-400"
-                    />
-                  </FormField>
-                  <FormField label="Potencia medida (W)">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      disabled={!!form.measurementFile}
-                      placeholder={form.measurementFile ? 'Se rellenará tras subir' : ''}
-                      value={form.measuredPowerW}
-                      onChange={handleInput('measuredPowerW')}
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-100 disabled:text-slate-400"
-                    />
-                  </FormField>
                   <FormField label="Cantidad" required>
                     <input
                       required
@@ -714,133 +715,283 @@ export default function AppliancesManager({
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                     />
                   </FormField>
-                  <FormField label="Horas activas (opcional)">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.25"
-                      value={form.activeHours}
-                      onChange={handleInput('activeHours')}
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                    />
-                  </FormField>
-                  {(form.modes.length ?? 0) > 0 && (
-                    <FormField label="Modo seleccionado">
-                      <select
-                        value={form.selectedModeIndex}
-                        onChange={handleInput('selectedModeIndex')}
-                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                      >
-                        <option value="">Base</option>
-                        {form.modes.map((mode, index) => (
-                          <option key={`form-mode-${index}`} value={index}>
-                            {mode.name}
-                          </option>
-                        ))}
-                      </select>
-                    </FormField>
+
+                  {/* ── Solo en modo manual ──────────────────────────────── */}
+                  {dataMode === 'manual' && (
+                    <>
+                      <FormField label="Potencia promedio (W)" required>
+                        <input
+                          required
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          value={form.averagePowerW}
+                          onChange={handleInput('averagePowerW')}
+                          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                        />
+                      </FormField>
+                      <FormField label="Horas activas al día">
+                        <input
+                          type="number"
+                          min="0"
+                          max="24"
+                          step="0.25"
+                          value={form.activeHours}
+                          onChange={handleInput('activeHours')}
+                          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                        />
+                      </FormField>
+                    </>
                   )}
-                  <FormField label="Estado por defecto">
-                    <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={form.alwaysOn}
-                        onChange={(event) =>
-                          setForm((prev) => ({ ...prev, alwaysOn: event.target.checked }))
-                        }
-                      />
-                      Siempre encendido (se incluye salvo desactivación manual)
-                    </label>
-                  </FormField>
                 </div>
 
-                <div className="rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
+                {/* Sección de lotes de medición — solo modo mediciones */}
+                {dataMode === 'mediciones' && <div className="rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
                   <div className="mb-3 flex items-center gap-2">
-                    <FileSpreadsheet className="h-4 w-4 text-sky-700" />
+                    <Layers className="h-4 w-4 text-sky-700" />
                     <h4 className="text-sm font-semibold text-sky-900">
-                      Perfil de consumo a partir de un archivo de mediciones
+                      Mediciones Hioki (lotes acumulativos)
                     </h4>
                   </div>
-                  <p className="mb-3 text-xs leading-relaxed text-sky-900/80">
-                    Adjunta un archivo TSV/CSV/XLS (formato analizador de red, p. ej. Hioki PW3360 con columnas
-                    {' '}<code>Date</code>, <code>Time</code>, <code>P(SUM)</code>). El sistema construye un perfil
-                    promedio por día de la semana y hora (168 valores) y lo usará para pronosticar el consumo
-                    de este equipo en lugar del promedio manual.
-                  </p>
-                  {form.hasProfile && form.measurementMeta && (
-                    <div className="mb-3 grid gap-2 rounded-xl border border-sky-200 bg-white px-3 py-2 text-xs text-slate-700 sm:grid-cols-2">
-                      <div>
-                        <span className="font-semibold">Muestras:</span> {form.measurementMeta.samples}
-                      </div>
-                      <div>
-                        <span className="font-semibold">Promedio:</span>{' '}
-                        {form.measurementMeta.avgKw.toFixed(2)} kW
-                      </div>
-                      <div>
-                        <span className="font-semibold">Rango:</span>{' '}
-                        {form.measurementMeta.minKw.toFixed(2)} – {form.measurementMeta.maxKw.toFixed(2)} kW
-                      </div>
-                      <div>
-                        <span className="font-semibold">Horas cubiertas:</span>{' '}
-                        {form.measurementMeta.hoursCovered}/168
-                      </div>
-                      {form._id && (
+
+                  {modalMode === 'create' ? (
+                    <p className="text-xs text-sky-900/70">
+                      Guarda el equipo primero para poder adjuntar mediciones.
+                    </p>
+                  ) : (
+                    <>
+                      {batchMessage && (
+                        <div
+                          className={`mb-3 rounded-xl border px-3 py-2 text-xs ${
+                            batchMessage.type === 'success'
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                              : 'border-rose-200 bg-rose-50 text-rose-700'
+                          }`}
+                        >
+                          {batchMessage.text}
+                        </div>
+                      )}
+
+                      {batchesLoading ? (
+                        <p className="text-xs text-sky-800">Cargando lotes…</p>
+                      ) : batches.length === 0 ? (
+                        <p className="mb-3 text-xs text-sky-900/60">No hay lotes cargados aún.</p>
+                      ) : (
+                        <div className="mb-3 space-y-2">
+                          {batches.map((batch) => (
+                            <div
+                              key={batch.batchId}
+                              className="flex items-center justify-between rounded-xl border border-sky-200 bg-white px-3 py-2 text-xs text-slate-700"
+                            >
+                              <div className="space-y-0.5">
+                                <div className="font-medium">
+                                  {new Date(batch.startDate).toLocaleDateString('es-ES')} –{' '}
+                                  {new Date(batch.endDate).toLocaleDateString('es-ES')}
+                                </div>
+                                <div className="text-slate-500">
+                                  {batch.samples} muestras •{' '}
+                                  {batch.kwhDayEstimatedThis.toFixed(2)} kWh/día
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (!form._id) return;
+                                  try {
+                                    await executeMutation(DELETE_APPLIANCE_BATCH_MUTATION, {
+                                      batchId: batch.batchId,
+                                    });
+                                    setBatchMessage({ type: 'success', text: 'Lote eliminado.' });
+                                    await loadBatches(form._id);
+                                    await onRefresh?.();
+                                  } catch (error) {
+                                    setBatchMessage({
+                                      type: 'error',
+                                      text:
+                                        error instanceof Error
+                                          ? error.message
+                                          : 'No se pudo eliminar el lote.',
+                                    });
+                                  }
+                                }}
+                                className="ml-3 inline-flex items-center gap-1 rounded-full border border-rose-200 px-2 py-1 text-[10px] font-semibold text-rose-600 hover:bg-rose-50"
+                              >
+                                <Trash className="h-3 w-3" />
+                                Eliminar
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {!batchAddOpen ? (
                         <button
                           type="button"
-                          onClick={async () => {
-                            if (!form._id) return;
-                            try {
-                              await executeMutation(CLEAR_MEASUREMENT_MUTATION, { id: form._id });
-                              setForm((prev) => ({
-                                ...prev,
-                                hasProfile: false,
-                                measurementMeta: null,
-                                measurementFile: null,
-                              }));
-                              setModalMessage({
-                                type: 'success',
-                                text: 'Perfil de mediciones eliminado.',
-                              });
-                              await onRefresh?.();
-                            } catch (error) {
-                              setModalMessage({
-                                type: 'error',
-                                text:
-                                  error instanceof Error
-                                    ? error.message
-                                    : 'No se pudo eliminar el perfil.',
-                              });
-                            }
+                          onClick={() => {
+                            setBatchAddOpen(true);
+                            setBatchFile(null);
+                            setBatchPreview(null);
+                            setBatchStartDate('');
+                            setBatchEndDate('');
                           }}
-                          className="col-span-full inline-flex items-center gap-2 self-start rounded-full border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                          className="inline-flex items-center gap-2 rounded-full border border-sky-300 bg-white px-3 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100"
                         >
-                          <Trash className="h-3.5 w-3.5" />
-                          Eliminar perfil cargado
+                          <Plus className="h-3.5 w-3.5" />
+                          Agregar mediciones
                         </button>
-                      )}
-                    </div>
-                  )}
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-sky-300 bg-white px-3 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100">
-                    <Upload className="h-3.5 w-3.5" />
-                    {form.measurementFile ? form.measurementFile.name : 'Seleccionar archivo'}
-                    <input
-                      type="file"
-                      accept=".xls,.xlsx,.csv,.tsv,.txt"
-                      className="hidden"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0] ?? null;
-                        setForm((prev) => ({ ...prev, measurementFile: file }));
-                      }}
-                    />
-                  </label>
-                  {form.measurementFile && (
-                    <p className="mt-2 text-xs text-sky-800">
-                      Se subirá al guardar el equipo y se generará el perfil automáticamente.
-                    </p>
-                  )}
-                </div>
+                      ) : (
+                        <div className="space-y-3 rounded-xl border border-sky-200 bg-white p-3">
+                          <p className="text-xs font-semibold text-sky-900">Nuevo lote de mediciones</p>
 
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100">
+                            <Upload className="h-3.5 w-3.5" />
+                            {batchFile ? batchFile.name : 'Seleccionar archivo (.xls/.xlsx/.csv/.tsv/.txt)'}
+                            <input
+                              type="file"
+                              accept=".xls,.xlsx,.csv,.tsv,.txt"
+                              className="hidden"
+                              onChange={async (event) => {
+                                const file = event.target.files?.[0] ?? null;
+                                setBatchFile(file);
+                                setBatchPreview(null);
+                                setBatchStartDate('');
+                                setBatchEndDate('');
+                                if (!file) return;
+                                try {
+                                  const fileContent = await readFileAsText(file);
+                                  const result = await executeMutation<{
+                                    previewApplianceBatch: BatchPreview;
+                                  }>(PREVIEW_APPLIANCE_BATCH_MUTATION, { fileContent });
+                                  const preview = result?.previewApplianceBatch ?? null;
+                                  setBatchPreview(preview);
+                                  if (preview?.startDate) {
+                                    setBatchStartDate(preview.startDate.slice(0, 10));
+                                  }
+                                  if (preview?.endDate) {
+                                    setBatchEndDate(preview.endDate.slice(0, 10));
+                                  }
+                                } catch (error) {
+                                  setBatchMessage({
+                                    type: 'error',
+                                    text:
+                                      error instanceof Error
+                                        ? error.message
+                                        : 'No se pudo generar la vista previa.',
+                                  });
+                                }
+                              }}
+                            />
+                          </label>
+
+                          {batchPreview && (
+                            <div className="rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-slate-700">
+                              <span className="font-semibold">Vista previa:</span>{' '}
+                              {batchPreview.samples} muestras
+                              {batchPreview.startDate && batchPreview.endDate && (
+                                <>
+                                  {' '}•{' '}
+                                  {new Date(batchPreview.startDate).toLocaleDateString('es-ES')} –{' '}
+                                  {new Date(batchPreview.endDate).toLocaleDateString('es-ES')}
+                                </>
+                              )}
+                            </div>
+                          )}
+
+                          {batchFile && (
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-500">
+                                Desde (opcional)
+                                <input
+                                  type="date"
+                                  value={batchStartDate}
+                                  onChange={(e) => setBatchStartDate(e.target.value)}
+                                  className="rounded-xl border border-slate-200 px-3 py-1.5 text-sm"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-500">
+                                Hasta (opcional)
+                                <input
+                                  type="date"
+                                  value={batchEndDate}
+                                  onChange={(e) => setBatchEndDate(e.target.value)}
+                                  className="rounded-xl border border-slate-200 px-3 py-1.5 text-sm"
+                                />
+                              </label>
+                            </div>
+                          )}
+
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              disabled={!batchFile || batchUploading}
+                              onClick={async () => {
+                                if (!batchFile || !form._id) return;
+                                setBatchUploading(true);
+                                setBatchMessage(null);
+                                try {
+                                  const fileContent = await readFileAsText(batchFile);
+                                  await executeMutation(UPLOAD_APPLIANCE_BATCH_MUTATION, {
+                                    id: form._id,
+                                    fileContent,
+                                    startDate: batchStartDate || undefined,
+                                    endDate: batchEndDate || undefined,
+                                  });
+                                  setBatchMessage({
+                                    type: 'success',
+                                    text: 'Lote subido correctamente.',
+                                  });
+                                  setBatchAddOpen(false);
+                                  setBatchFile(null);
+                                  setBatchPreview(null);
+                                  await loadBatches(form._id);
+                                  await onRefresh?.();
+                                } catch (error) {
+                                  setBatchMessage({
+                                    type: 'error',
+                                    text:
+                                      error instanceof Error
+                                        ? error.message
+                                        : 'No se pudo subir el lote.',
+                                  });
+                                } finally {
+                                  setBatchUploading(false);
+                                }
+                              }}
+                              className="inline-flex items-center gap-2 rounded-full bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60 hover:bg-sky-700"
+                            >
+                              {batchUploading ? (
+                                <>
+                                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                  Subiendo…
+                                </>
+                              ) : (
+                                <>
+                                  <Upload className="h-3.5 w-3.5" />
+                                  Subir mediciones
+                                </>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setBatchAddOpen(false);
+                                setBatchFile(null);
+                                setBatchPreview(null);
+                                setBatchMessage(null);
+                              }}
+                              className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>}
+
+                {/* Modos de consumo — solo modo manual */}
+                {dataMode === 'manual' && <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
                   <h4 className="mb-3 text-sm font-semibold text-slate-800">Modos de consumo (opcional)</h4>
                   {form.modes.length > 0 && (
                     <div className="mb-3 space-y-2">
@@ -899,7 +1050,7 @@ export default function AppliancesManager({
                     <Plus className="h-3.5 w-3.5" />
                     Agregar modo
                   </button>
-                </div>
+                </div>}
 
                 <div className="flex flex-wrap justify-end gap-3">
                   <button

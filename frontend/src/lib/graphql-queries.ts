@@ -407,6 +407,96 @@ export const DELETE_APPLIANCE_MUTATION = `
   }
 `
 
+// ── Mediciones por lote (Hioki) ──────────────────────────────────────────────
+
+export const APPLIANCE_BATCHES_QUERY = `
+  query ApplianceBatches($applianceId: String!) {
+    applianceBatches(applianceId: $applianceId) {
+      batchId
+      applianceId
+      applianceName
+      filename
+      uploadedAt
+      startDate
+      endDate
+      samples
+      kwhDayEstimatedThis
+      kwhDayEstimatedOthers
+    }
+  }
+`
+
+export const DAILY_REPORT_QUERY = `
+  query DailyReport($date: String!) {
+    dailyReport(date: $date) {
+      date
+      productionKwh
+      measuredConsumptionKwh
+      estimatedConsumptionKwh
+      totalConsumptionKwh
+      hasRealData
+      appliances {
+        applianceId
+        name
+        mode
+        kwhDay
+        kwhDayEstimated
+        errorPercent
+        readingCount
+      }
+    }
+  }
+`
+
+export const APPLIANCE_READINGS_QUERY = `
+  query ApplianceReadings($applianceId: String!, $startDate: String!, $endDate: String!) {
+    applianceReadings(applianceId: $applianceId, startDate: $startDate, endDate: $endDate) {
+      timestamp
+      powerKw
+    }
+  }
+`
+
+export const PREVIEW_APPLIANCE_BATCH_MUTATION = `
+  mutation PreviewApplianceBatch($fileContent: String!) {
+    previewApplianceBatch(fileContent: $fileContent) {
+      samples
+      startDate
+      endDate
+    }
+  }
+`
+
+export const UPLOAD_APPLIANCE_BATCH_MUTATION = `
+  mutation UploadApplianceBatch(
+    $id: String!
+    $fileContent: String!
+    $startDate: String
+    $endDate: String
+  ) {
+    uploadApplianceBatch(
+      id: $id
+      fileContent: $fileContent
+      startDate: $startDate
+      endDate: $endDate
+    ) {
+      batchId
+      applianceName
+      startDate
+      endDate
+      samples
+      kwhDayEstimatedThis
+      kwhDayEstimatedOthers
+    }
+  }
+`
+
+export const DELETE_APPLIANCE_BATCH_MUTATION = `
+  mutation DeleteApplianceBatch($batchId: String!) {
+    deleteApplianceBatch(batchId: $batchId)
+  }
+`
+
 // ── Perfil de sombras ────────────────────────────────────────────────────────
 
 export const SHADOW_PROFILE_QUERY = `

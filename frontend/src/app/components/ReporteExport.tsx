@@ -25,7 +25,7 @@ import type { HistoricalReading, DailySummary } from '@/types';
 const READINGS_QUERY = `
   query ExportReadings($startDate: String, $endDate: String, $limit: Int) {
     historicalReadings(startDate: $startDate, endDate: $endDate, limit: $limit) {
-      _id timestamp production consumption batteryLevel gridExport gridImport efficiency
+      _id timestamp productionKw
     }
   }
 `;
@@ -33,7 +33,7 @@ const READINGS_QUERY = `
 const SUMMARIES_QUERY = `
   query ExportSummaries($days: Int) {
     dailySummaries(days: $days) {
-      date totalProduction totalConsumption avgBatteryLevel maxProduction maxConsumption avgEfficiency readingCount
+      date totalProductionKwh maxProductionKw readingCount
     }
   }
 `;

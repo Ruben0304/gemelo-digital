@@ -103,6 +103,14 @@ from app.services.lectura_service import (
     save_reading,
     seed_historical_data,
 )
+from app.services.medicion_service import (
+    upload_batch as upload_appliance_batch,
+    delete_batch as delete_appliance_batch,
+    list_batches as list_appliance_batches,
+    get_daily_report,
+    get_appliance_readings,
+    preview_batch,
+)
 
 
 # ============================================================================
@@ -447,24 +455,64 @@ class AuthPayloadType:
 class HistoricalReadingType:
     id_: str = strawberry.field(name="_id")
     timestamp: str
-    production: float
-    consumption: float
-    batteryLevel: float
-    gridExport: float
-    gridImport: float
-    efficiency: float
+    productionKw: float
 
 
 @strawberry.type
 class DailySummaryType:
     date: str
-    totalProduction: float
-    totalConsumption: float
-    avgBatteryLevel: float
-    maxProduction: float
-    maxConsumption: float
-    avgEfficiency: float
+    totalProductionKwh: float
+    maxProductionKw: float
     readingCount: int
+
+
+@strawberry.type
+class ApplianceBatchType:
+    batchId: str
+    applianceId: str
+    applianceName: str
+    filename: str
+    uploadedAt: str
+    startDate: str
+    endDate: str
+    samples: int
+    kwhDayEstimatedThis: float
+    kwhDayEstimatedOthers: float
+
+
+@strawberry.type
+class BatchPreviewType:
+    samples: int
+    startDate: Optional[str]
+    endDate: Optional[str]
+
+
+@strawberry.type
+class ApplianceReadingPointType:
+    timestamp: str
+    powerKw: float
+
+
+@strawberry.type
+class DailyReportApplianceType:
+    applianceId: str
+    name: str
+    mode: str  # "medido" | "estimado"
+    kwhDay: float
+    kwhDayEstimated: Optional[float]
+    errorPercent: Optional[float]
+    readingCount: int
+
+
+@strawberry.type
+class DailyReportType:
+    date: str
+    productionKwh: Optional[float]
+    measuredConsumptionKwh: float
+    estimatedConsumptionKwh: float
+    totalConsumptionKwh: float
+    hasRealData: bool
+    appliances: List[DailyReportApplianceType]
 
 
 @strawberry.type
@@ -802,7 +850,7 @@ def _scale_ml_predictions(
         target_capacity_kw = _get_real_capacity_kw_from_config(config)
 
     if not target_capacity_kw or target_capacity_kw <= 0:
-        return predictions
+        return [{**pred, "production_kw": 0.0} for pred in predictions]
 
     scale_factor = target_capacity_kw / reference_capacity_kw
     scaled_predictions: List[Dict[str, Any]] = []
@@ -1458,27 +1506,65 @@ class Query:
         end_date: Optional[str] = None,
         limit: int = 288,
     ) -> List[HistoricalReadingType]:
-        """Query historical solar readings with optional date range filter."""
+        """Query historical solar production readings with optional date range filter."""
         readings = get_readings(start_date, end_date, limit)
         return [
             HistoricalReadingType(
                 id_=r["_id"],
                 timestamp=r["timestamp"],
-                production=r["production"],
-                consumption=r["consumption"],
-                batteryLevel=r["batteryLevel"],
-                gridExport=r["gridExport"],
-                gridImport=r["gridImport"],
-                efficiency=r["efficiency"],
+                productionKw=r.get("productionKw", r.get("production", 0.0)),
             )
             for r in readings
         ]
 
     @strawberry.field
     def daily_summaries(self, days: int = 30) -> List[DailySummaryType]:
-        """Get daily aggregated summaries for the last N days."""
+        """Get daily aggregated production summaries for the last N days."""
         summaries = get_daily_summaries(days)
         return [DailySummaryType(**s) for s in summaries]
+
+    @strawberry.field
+    def appliance_batches(self, appliance_id: str) -> List[ApplianceBatchType]:
+        """List all uploaded measurement batches for an appliance."""
+        batches = list_appliance_batches(appliance_id)
+        return [ApplianceBatchType(**b) for b in batches]
+
+    @strawberry.field
+    def daily_report(self, date: str) -> DailyReportType:
+        """
+        Full daily energy report for a given date (YYYY-MM-DD).
+        Combines real Hioki measurements with estimated consumption from appliance configs.
+        """
+        report = get_daily_report(date)
+        appliances = [
+            DailyReportApplianceType(
+                applianceId=a["applianceId"],
+                name=a["name"],
+                mode=a["mode"],
+                kwhDay=a["kwhDay"],
+                kwhDayEstimated=a.get("kwhDayEstimated"),
+                errorPercent=a.get("errorPercent"),
+                readingCount=a.get("readingCount", 0),
+            )
+            for a in report["appliances"]
+        ]
+        return DailyReportType(
+            date=report["date"],
+            productionKwh=report.get("productionKwh"),
+            measuredConsumptionKwh=report["measuredConsumptionKwh"],
+            estimatedConsumptionKwh=report["estimatedConsumptionKwh"],
+            totalConsumptionKwh=report["totalConsumptionKwh"],
+            hasRealData=report["hasRealData"],
+            appliances=appliances,
+        )
+
+    @strawberry.field
+    def appliance_readings(
+        self, appliance_id: str, start_date: str, end_date: str
+    ) -> List[ApplianceReadingPointType]:
+        """Return minute-level Hioki readings for an appliance in a date range."""
+        points = get_appliance_readings(appliance_id, start_date, end_date)
+        return [ApplianceReadingPointType(**p) for p in points]
 
     @strawberry.field
     def weather_sources(self) -> List[WeatherSourceType]:
@@ -1746,6 +1832,67 @@ class Mutation:
         if not appliance:
             raise ValueError("Electrodoméstico no encontrado.")
         return _map_appliance(appliance)
+
+    @strawberry.mutation(name="previewApplianceBatch")
+    def preview_appliance_batch_mutation(
+        self, info: strawberry.types.Info, file_content: str
+    ) -> BatchPreviewType:
+        """Parse a file and return detected date range + sample count without storing."""
+        require_admin(info.context)
+        result = preview_batch(file_content)
+        return BatchPreviewType(**result)
+
+    @strawberry.mutation(name="uploadApplianceBatch")
+    def upload_appliance_batch_mutation(
+        self,
+        info: strawberry.types.Info,
+        id: str,
+        file_content: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> ApplianceBatchType:
+        """
+        Upload a Hioki measurement file for an appliance. Accumulates readings
+        into mediciones_equipos (upsert) and rebuilds the 168-bin hourly profile.
+        Stores a snapshot of estimated kWh/day for error analysis.
+        """
+        require_admin(info.context)
+        # Compute estimation snapshot from current appliance configs
+        this_appl = get_appliance(id)
+        if not this_appl:
+            raise ValueError("Electrodoméstico no encontrado.")
+
+        all_appliances = list_appliances()
+        kwh_this = (
+            (this_appl.get("averagePowerW") or 0.0)
+            * (this_appl.get("activeHours") or 0.0)
+            / 1000.0
+        )
+        kwh_others = sum(
+            (a.get("averagePowerW") or 0.0) * (a.get("activeHours") or 0.0) / 1000.0
+            for a in all_appliances
+            if str(a.get("_id", "")) != id
+        )
+
+        batch = upload_appliance_batch(
+            appliance_id=id,
+            appliance_name=this_appl.get("name", ""),
+            file_content=file_content,
+            filename="archivo.xls",
+            start_date=start_date,
+            end_date=end_date,
+            kwh_day_estimated_this=kwh_this,
+            kwh_day_estimated_others=kwh_others,
+        )
+        return ApplianceBatchType(**batch)
+
+    @strawberry.mutation(name="deleteApplianceBatch")
+    def delete_appliance_batch_mutation(
+        self, info: strawberry.types.Info, batch_id: str
+    ) -> bool:
+        """Delete a measurement batch and rebuild the appliance's hourly profile."""
+        require_admin(info.context)
+        return delete_appliance_batch(batch_id)
 
     @strawberry.mutation(name="createInverter")
     def create_inverter_mutation(self, info: strawberry.types.Info, input: InverterInput) -> InverterType:

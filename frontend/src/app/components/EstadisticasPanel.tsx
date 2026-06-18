@@ -47,12 +47,7 @@ const HISTORICAL_READINGS_QUERY = `
     historicalReadings(startDate: $startDate, endDate: $endDate, limit: $limit) {
       _id
       timestamp
-      production
-      consumption
-      batteryLevel
-      gridExport
-      gridImport
-      efficiency
+      productionKw
     }
   }
 `;
@@ -61,12 +56,8 @@ const DAILY_SUMMARIES_QUERY = `
   query DailySummaries($days: Int) {
     dailySummaries(days: $days) {
       date
-      totalProduction
-      totalConsumption
-      avgBatteryLevel
-      maxProduction
-      maxConsumption
-      avgEfficiency
+      totalProductionKwh
+      maxProductionKw
       readingCount
     }
   }
@@ -216,21 +207,18 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
   // ── Historical derived data ──
   const histHasData = histView === 'daily' ? summaries.length > 0 : readings.length > 0;
 
-  const totalProduction = summaries.reduce((s, d) => s + d.totalProduction, 0);
-  const totalConsumption = summaries.reduce((s, d) => s + d.totalConsumption, 0);
+  const totalProduction = summaries.reduce((s, d) => s + d.totalProductionKwh, 0);
   const totalCo2 = totalProduction * 0.5;
-  const selfSufficiency = totalConsumption > 0 ? Math.min(100, (totalProduction / totalConsumption) * 100) : 0;
+  const maxProductionKw = summaries.length > 0 ? Math.max(...summaries.map((d) => d.maxProductionKw)) : 0;
 
   const hourlyChartData = readings.map((r) => ({
     time: formatHour(r.timestamp),
-    Producción: r.production,
-    Consumo: r.consumption,
+    Producción: r.productionKw,
   }));
 
   const dailyChartData = summaries.map((s) => ({
     fecha: formatDate(s.date),
-    Producción: s.totalProduction,
-    Consumo: s.totalConsumption,
+    Producción: s.totalProductionKwh,
   }));
 
   // ── Prediction derived data ──
@@ -240,7 +228,7 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
   // No extrapolamos más allá: sin datos meteorológicos no hay predicción fiable.
   const typicalConsumption = useMemo(() => {
     if (summaries.length === 0) return null;
-    return summaries.reduce((s, d) => s + d.totalConsumption, 0) / summaries.length;
+    return summaries.reduce((s, d) => s + d.totalProductionKwh, 0) / summaries.length;
   }, [summaries]);
 
   const prediction = useMemo(() => {
@@ -326,9 +314,8 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
           exporting={exporting}
           histHasData={histHasData}
           totalProduction={totalProduction}
-          totalConsumption={totalConsumption}
           totalCo2={totalCo2}
-          selfSufficiency={selfSufficiency}
+          maxProductionKw={maxProductionKw}
           dailyChartData={dailyChartData}
           hourlyChartData={hourlyChartData}
           onRefresh={fetchData}
@@ -354,9 +341,8 @@ function HistoricalView({
   exporting,
   histHasData,
   totalProduction,
-  totalConsumption,
   totalCo2,
-  selfSufficiency,
+  maxProductionKw,
   dailyChartData,
   hourlyChartData,
   onRefresh,
@@ -372,11 +358,10 @@ function HistoricalView({
   exporting: boolean;
   histHasData: boolean;
   totalProduction: number;
-  totalConsumption: number;
   totalCo2: number;
-  selfSufficiency: number;
-  dailyChartData: Array<{ fecha: string; Producción: number; Consumo: number }>;
-  hourlyChartData: Array<{ time: string; Producción: number; Consumo: number }>;
+  maxProductionKw: number;
+  dailyChartData: Array<{ fecha: string; Producción: number }>;
+  hourlyChartData: Array<{ time: string; Producción: number }>;
   onRefresh: () => void;
   onExportCsv: () => void;
   onExportPdf: () => void;
@@ -388,7 +373,7 @@ function HistoricalView({
       {/* Controls */}
       <div className="flex flex-wrap items-center justify-end gap-3">
         <div className="mr-auto text-sm text-slate-500">
-          Serie temporal de producción y consumo
+          Serie temporal de producción solar
         </div>
 
         <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
@@ -452,11 +437,10 @@ function HistoricalView({
 
       {/* KPIs (daily view) */}
       {histView === 'daily' && histHasData && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           <KpiCard label="Producción total" value={`${totalProduction.toFixed(1)} kWh`} color="text-yellow-600" />
-          <KpiCard label="Consumo total" value={`${totalConsumption.toFixed(1)} kWh`} color="text-blue-600" />
           <KpiCard label="CO₂ evitado" value={`${totalCo2.toFixed(1)} kg`} color="text-green-600" />
-          <KpiCard label="Autosuficiencia" value={`${selfSufficiency.toFixed(0)} %`} color="text-emerald-600" />
+          <KpiCard label="Máx. producción" value={`${maxProductionKw.toFixed(1)} kW`} color="text-emerald-600" />
         </div>
       )}
 
@@ -477,7 +461,7 @@ function HistoricalView({
       {!noData && (
         <div className="rounded-2xl border border-slate-200 bg-white p-6">
           <h3 className="mb-4 text-sm font-semibold text-slate-700">
-            {histView === 'daily' ? 'Producción y consumo diarios (kWh)' : 'Producción y consumo por hora (kW)'}
+            {histView === 'daily' ? 'Producción solar diaria (kWh)' : 'Producción solar por hora (kW)'}
           </h3>
           <ResponsiveContainer width="100%" height={320}>
             {histView === 'daily' ? (
@@ -487,18 +471,13 @@ function HistoricalView({
                     <stop offset="0%" stopColor="#facc15" stopOpacity={0.95} />
                     <stop offset="100%" stopColor="#fde68a" stopOpacity={0.75} />
                   </linearGradient>
-                  <linearGradient id="gCons" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#60a5fa" stopOpacity={0.95} />
-                    <stop offset="100%" stopColor="#bfdbfe" stopOpacity={0.75} />
-                  </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#eef2f6" vertical={false} />
                 <XAxis dataKey="fecha" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: '#64748b', fontSize: 11 }} unit=" kWh" axisLine={false} tickLine={false} />
                 <Tooltip content={<ChartTooltip unit=" kWh" />} cursor={{ fill: 'rgba(148,163,184,0.08)' }} />
                 <Legend wrapperStyle={{ color: '#475569', fontSize: 12 }} />
-                <Bar dataKey="Producción" fill="url(#gProd)" radius={[4, 4, 0, 0]} maxBarSize={34} />
-                <Bar dataKey="Consumo" fill="url(#gCons)" radius={[4, 4, 0, 0]} maxBarSize={34} />
+                <Bar dataKey="Producción" fill="url(#gProd)" radius={[4, 4, 0, 0]} maxBarSize={48} />
               </ComposedChart>
             ) : (
               <AreaChart data={hourlyChartData}>
@@ -506,10 +485,6 @@ function HistoricalView({
                   <linearGradient id="gProdArea" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#facc15" stopOpacity={0.4} />
                     <stop offset="100%" stopColor="#facc15" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="gConsArea" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#60a5fa" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#60a5fa" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#eef2f6" vertical={false} />
@@ -524,7 +499,6 @@ function HistoricalView({
                 <Tooltip content={<ChartTooltip unit=" kW" />} />
                 <Legend wrapperStyle={{ color: '#475569', fontSize: 12 }} />
                 <Area type="monotone" dataKey="Producción" stroke="#eab308" strokeWidth={2} fill="url(#gProdArea)" />
-                <Area type="monotone" dataKey="Consumo" stroke="#3b82f6" strokeWidth={2} fill="url(#gConsArea)" />
               </AreaChart>
             )}
           </ResponsiveContainer>

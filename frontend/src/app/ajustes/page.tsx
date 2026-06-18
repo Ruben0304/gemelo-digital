@@ -65,7 +65,7 @@ const sections = [
   {
     href: '/ajustes/sombras',
     title: 'Configurar sombra',
-    subtitle: 'Simulador 3D de sombras sobre paneles solares',
+    subtitle: 'Perfil de sombra por franja horaria y su impacto en la producción',
     icon: <Sun className="h-5 w-5 text-orange-500" />,
   },
 ] as const;

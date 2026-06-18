@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { executeMutation } from '@/lib/graphql-client';
 import { ArrowRightIcon, ArrowLeftIcon, CheckIcon, ArrowPathIcon, PlusIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { Activity, PenLine } from 'lucide-react';
 
 // Lazy-load Leaflet map (client-only, no SSR)
 const MapPicker = dynamic(() => import('./MapPicker'), {
@@ -82,6 +83,7 @@ interface ApplianceDraft {
   maxPowerW: number;
   quantity: number;
   activeHours?: number;
+  isMediciones?: boolean;
 }
 
 // Apple-inspired palette
@@ -1130,6 +1132,7 @@ function AppliancesContent({
   onSkip: () => void;
   onBack: () => void;
 }) {
+  const [dataMode, setDataMode] = useState<'manual' | 'mediciones'>('manual');
   const [items, setItems] = useState<ApplianceDraft[]>([]);
   const [name, setName] = useState('');
   const [category, setCategory] = useState('');
@@ -1151,7 +1154,7 @@ function AppliancesContent({
   };
 
   const avg = parseFloat(avgW);
-  const canAdd = !!name.trim() && Number.isFinite(avg) && avg > 0;
+  const canAdd = !!name.trim() && (dataMode === 'mediciones' || (Number.isFinite(avg) && avg > 0));
 
   const addItem = () => {
     if (!canAdd) return;
@@ -1163,10 +1166,11 @@ function AppliancesContent({
       {
         name: name.trim(),
         category: category.trim() || undefined,
-        averagePowerW: avg,
-        maxPowerW: Number.isFinite(max) && max > 0 ? max : avg,
+        averagePowerW: dataMode === 'mediciones' ? 0 : avg,
+        maxPowerW: dataMode === 'mediciones' ? 0 : (Number.isFinite(max) && max > 0 ? max : avg),
         quantity: Number.isFinite(qty) && qty > 0 ? qty : 1,
-        activeHours: Number.isFinite(hours) && hours >= 0 ? hours : undefined,
+        activeHours: dataMode === 'manual' && Number.isFinite(hours) && hours >= 0 ? hours : undefined,
+        isMediciones: dataMode === 'mediciones',
       },
     ]);
     setName(''); setCategory(''); setAvgW(''); setMaxW(''); setQuantity('1'); setActiveHours('');
@@ -1192,25 +1196,95 @@ function AppliancesContent({
       />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        {/* Quick presets */}
-        <div className="wiz-stagger" style={{ animationDelay: '160ms' }}>
-          <p style={{ fontSize: 12, color: C.text4, marginBottom: 9 }}>
-            Equipos comunes — haga clic para rellenar el formulario:
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {APPLIANCE_PRESETS.map(p => (
-              <button
-                key={p.name}
-                onClick={() => applyPreset(p)}
-                className="wiz-chip"
-                style={{ fontFamily: FONT_STACK }}
-              >
-                {p.name}
-                <span style={{ color: C.text4, fontWeight: 400, marginLeft: 5 }}>{p.avg} W</span>
-              </button>
-            ))}
-          </div>
+
+        {/* ── Selector de modo ─────────────────────────────────────────────── */}
+        <div className="wiz-stagger" style={{ animationDelay: '140ms', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <button
+            type="button"
+            onClick={() => setDataMode('manual')}
+            style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8,
+              borderRadius: 16, border: `2px solid ${dataMode === 'manual' ? '#f59e0b' : C.borderLight}`,
+              background: dataMode === 'manual' ? '#fffbeb' : C.white,
+              padding: '14px 14px', textAlign: 'left', cursor: 'pointer',
+              transition: 'all 0.15s ease',
+              boxShadow: dataMode === 'manual' ? '0 1px 6px rgba(245,158,11,0.15)' : 'none',
+            }}
+          >
+            <span style={{
+              borderRadius: 10, padding: '6px',
+              background: dataMode === 'manual' ? '#fef3c7' : C.bgChip,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <PenLine size={15} color={dataMode === 'manual' ? '#d97706' : C.text4} />
+            </span>
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 600, color: dataMode === 'manual' ? '#92400e' : C.text, lineHeight: 1.2 }}>Manual</p>
+              <p style={{ fontSize: 11, color: C.text4, marginTop: 3, lineHeight: 1.4 }}>Potencia estimada y horas de uso</p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setDataMode('mediciones')}
+            style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8,
+              borderRadius: 16, border: `2px solid ${dataMode === 'mediciones' ? '#38bdf8' : C.borderLight}`,
+              background: dataMode === 'mediciones' ? '#f0f9ff' : C.white,
+              padding: '14px 14px', textAlign: 'left', cursor: 'pointer',
+              transition: 'all 0.15s ease',
+              boxShadow: dataMode === 'mediciones' ? '0 1px 6px rgba(56,189,248,0.15)' : 'none',
+            }}
+          >
+            <span style={{
+              borderRadius: 10, padding: '6px',
+              background: dataMode === 'mediciones' ? '#e0f2fe' : C.bgChip,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Activity size={15} color={dataMode === 'mediciones' ? '#0284c7' : C.text4} />
+            </span>
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 600, color: dataMode === 'mediciones' ? '#0c4a6e' : C.text, lineHeight: 1.2 }}>Mediciones reales</p>
+              <p style={{ fontSize: 11, color: C.text4, marginTop: 3, lineHeight: 1.4 }}>Datos del analizador de red</p>
+            </div>
+          </button>
         </div>
+
+        {/* ── Badge de compatibilidad ──────────────────────────────────────── */}
+        {dataMode === 'mediciones' && (
+          <div className="wiz-stagger" style={{
+            animationDelay: '160ms',
+            display: 'flex', alignItems: 'center', gap: 8,
+            borderRadius: 10, border: '1px solid #bae6fd',
+            background: '#f0f9ff', padding: '8px 12px',
+            fontSize: 11.5, color: '#0369a1',
+          }}>
+            <Activity size={13} color="#0369a1" style={{ flexShrink: 0 }} />
+            <span>Compatible con <strong>Hioki PW3360</strong> y analizadores de red con exportación TSV / XLS / CSV</span>
+          </div>
+        )}
+
+        {/* Quick presets — solo modo manual */}
+        {dataMode === 'manual' && (
+          <div className="wiz-stagger" style={{ animationDelay: '160ms' }}>
+            <p style={{ fontSize: 12, color: C.text4, marginBottom: 9 }}>
+              Equipos comunes — haga clic para rellenar el formulario:
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {APPLIANCE_PRESETS.map(p => (
+                <button
+                  key={p.name}
+                  onClick={() => applyPreset(p)}
+                  className="wiz-chip"
+                  style={{ fontFamily: FONT_STACK }}
+                >
+                  {p.name}
+                  <span style={{ color: C.text4, fontWeight: 400, marginLeft: 5 }}>{p.avg} W</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <SectionLabel delay={200}>Nuevo equipo</SectionLabel>
 
@@ -1223,23 +1297,33 @@ function AppliancesContent({
           </Field>
         </div>
 
-        <div className="wiz-grid2">
-          <Field label="Potencia media" hint="Consumo promedio en watts." required delay={300}>
-            <Input value={avgW} onChange={setAvgW} type="number" step="1" min="1" placeholder="150" />
-          </Field>
-          <Field label="Potencia máxima" hint="En watts; vacío = igual a la media." delay={330}>
-            <Input value={maxW} onChange={setMaxW} type="number" step="1" min="1" placeholder="400" />
-          </Field>
-        </div>
-
-        <div className="wiz-grid2">
-          <Field label="Cantidad" hint="Unidades de este equipo." delay={360}>
-            <Input value={quantity} onChange={setQuantity} type="number" step="1" min="1" placeholder="1" />
-          </Field>
-          <Field label="Horas activas por día" hint="Opcional; uso diario estimado." delay={390}>
-            <Input value={activeHours} onChange={setActiveHours} type="number" step="0.5" min="0" max="24" placeholder="8" />
-          </Field>
-        </div>
+        {/* Campos de potencia — solo modo manual */}
+        {dataMode === 'manual' ? (
+          <>
+            <div className="wiz-grid2">
+              <Field label="Potencia media" hint="Consumo promedio en watts." required delay={300}>
+                <Input value={avgW} onChange={setAvgW} type="number" step="1" min="1" placeholder="150" />
+              </Field>
+              <Field label="Potencia máxima" hint="En watts; vacío = igual a la media." delay={330}>
+                <Input value={maxW} onChange={setMaxW} type="number" step="1" min="1" placeholder="400" />
+              </Field>
+            </div>
+            <div className="wiz-grid2">
+              <Field label="Cantidad" hint="Unidades de este equipo." delay={360}>
+                <Input value={quantity} onChange={setQuantity} type="number" step="1" min="1" placeholder="1" />
+              </Field>
+              <Field label="Horas activas por día" hint="Opcional; uso diario estimado." delay={390}>
+                <Input value={activeHours} onChange={setActiveHours} type="number" step="0.5" min="0" max="24" placeholder="8" />
+              </Field>
+            </div>
+          </>
+        ) : (
+          <div className="wiz-grid2">
+            <Field label="Cantidad" hint="Unidades de este equipo." delay={300}>
+              <Input value={quantity} onChange={setQuantity} type="number" step="1" min="1" placeholder="1" />
+            </Field>
+          </div>
+        )}
 
         <div className="wiz-stagger" style={{ animationDelay: '420ms', display: 'flex', justifyContent: 'flex-end' }}>
           <button
@@ -1306,9 +1390,15 @@ function AppliancesContent({
                     )}
                   </div>
                   <span style={{ fontSize: 13, fontWeight: 500, color: C.text2, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                    {item.averagePowerW * item.quantity} W
-                    {item.activeHours !== undefined && (
-                      <span style={{ color: C.text4, fontWeight: 400 }}> · {item.activeHours} h/día</span>
+                    {item.isMediciones ? (
+                      <span style={{ color: '#0284c7', fontWeight: 500, fontSize: 11.5, background: '#e0f2fe', borderRadius: 6, padding: '2px 7px' }}>Mediciones</span>
+                    ) : (
+                      <>
+                        {item.averagePowerW * item.quantity} W
+                        {item.activeHours !== undefined && (
+                          <span style={{ color: C.text4, fontWeight: 400 }}> · {item.activeHours} h/día</span>
+                        )}
+                      </>
                     )}
                   </span>
                   <button
@@ -1517,7 +1607,6 @@ export default function OnboardingWizard({ onComplete }: Props) {
             maxPowerW: item.maxPowerW,
             quantity: item.quantity,
             activeHours: item.activeHours,
-            alwaysOn: true,
           },
         });
       }
