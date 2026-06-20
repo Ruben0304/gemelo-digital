@@ -1,0 +1,32 @@
+@startuml fig_flujo_consumo
+' Flujo de datos (Tuberías y Filtros) — predicción de consumo eléctrico
+!include _estilo_cujae.puml
+skinparam ActivityBackgroundColor #FAFAFA
+skinparam ActivityBorderColor #2C3E50
+
+title Flujo de datos — predicción de consumo eléctrico
+
+start
+:Marca de tiempo del primer
+intervalo a predecir;
+:Generación de variables de calendario
+(18 características): hora, día de la semana,
+mes, día del mes, semana, indicadores de
+fin de semana / festivo / hora pico / laboral,
+cíclicas seno-coseno, campus_id, meter_id;
+if (¿modelo de consumo disponible?) then (sí)
+  :Modelo Random Forest de consumo
+  (entrenado con medidor de campus CUJAE);
+  :Escalado por divisor de ajuste
+  (ML_CONSUMPTION_SCALE_DIVISOR ≈ 10)
+  para aproximar la microrred;
+else (no — respaldo)
+  :Perfil tipificado por hora
+  (consumption_profiles: día / fin de semana);
+endif
+:Demanda eléctrica horaria (kW);
+:Integración con el servicio de
+autonomía de baterías;
+stop
+
+@enduml

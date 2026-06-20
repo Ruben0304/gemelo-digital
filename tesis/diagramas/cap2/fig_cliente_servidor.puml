@@ -1,0 +1,34 @@
+@startuml fig_cliente_servidor
+' Patrón Cliente-Servidor del gemelo digital (comunicación real vía GraphQL)
+!include _estilo_cujae.puml
+
+title Patrón Cliente–Servidor del gemelo digital web
+
+node "Cliente — Navegador web" as CLIENT {
+  component "Aplicación Next.js 15 / React 19" as APP
+  component "Cliente urql (GraphQL)" as U
+  artifact "JWT (HS256)\nen localStorage" as JWT
+  APP --> U
+  APP ..> JWT
+}
+
+node "Servidor de aplicación — Python" as SERVER {
+  component "FastAPI + Strawberry GraphQL" as API
+  component "Servicios de dominio\n(~27 servicios)" as SVC
+  component "Modelos ML en memoria\n(Havana v1 · Consumo ·\nMobileNetV2)" as ML
+  API --> SVC
+  SVC --> ML
+}
+
+database "MongoDB\nGemeloDigitalCujai" as DB
+
+cloud "API Open-Meteo" as OM
+node "Directorio LDAP\n(opcional)" as LDAP
+
+U --> API : "HTTP · POST /graphql (:8001)\nAuthorization: Bearer <JWT>"
+APP --> API : "POST /api/classify-panel\n(imagen multipart)"
+SVC --> DB : "driver Mongo"
+SVC --> OM : "HTTPS (clima)"
+SVC --> LDAP : "bind/search\n(autenticación)"
+
+@enduml

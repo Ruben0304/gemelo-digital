@@ -1,0 +1,196 @@
+@startuml fig_db_fisico
+' Diagrama físico de la base de datos GemeloDigitalCujai (MongoDB)
+' Nombres de colección REALES tal como aparecen en el código del backend.
+!include _estilo_cujae.puml
+hide circle
+skinparam linetype ortho
+skinparam classAttributeIconSize 0
+skinparam entity {
+  HeaderBackgroundColor #1A3A5C
+  FontColor White
+  FontSize 10
+  FontStyle Bold
+  AttributeFontColor #1A1A2E
+  AttributeFontSize 8
+}
+
+title Base de datos documental **GemeloDigitalCujai** (MongoDB) — 11 colecciones
+
+' ─────────────── DOMINIO FÍSICO ───────────────
+package "Dominio físico de la microrred" #F2F5F8 {
+
+  entity "paneles" as PAN {
+    _id               : ObjectId <<PK>>
+    --
+    manufacturer      : String
+    model             : String
+    ratedPowerKw      : Float
+    quantity          : Integer
+    tiltDegrees       : Float
+    orientation       : String
+    efficiencyPercent : Float
+    areaM2            : Float
+    createdAt         : DateTime
+    updatedAt         : DateTime
+  }
+
+  entity "baterias" as BAT {
+    _id                        : ObjectId <<PK>>
+    --
+    manufacturer               : String
+    model                      : String
+    capacityKwh                : Float
+    quantity                   : Integer
+    maxDepthOfDischargePercent : Float
+    chargeRateKw               : Float
+    dischargeRateKw            : Float
+    efficiencyPercent          : Float
+    createdAt                  : DateTime
+    updatedAt                  : DateTime
+  }
+
+  entity "inversores" as INV {
+    _id               : ObjectId <<PK>>
+    --
+    manufacturer      : String
+    model             : String
+    ratedPowerKw      : Float
+    quantity          : Integer
+    efficiencyPercent : Float
+    createdAt         : DateTime
+    updatedAt         : DateTime
+  }
+
+  entity "electrodomesticos" as ELEC {
+    _id               : ObjectId <<PK>>
+    --
+    name              : String
+    category          : String
+    averagePowerW     : Float
+    maxPowerW         : Float
+    measuredPowerW    : Float
+    quantity          : Integer
+    selectedModeIndex : Integer
+    alwaysOn          : Boolean
+    modes             : Array<obj> <<embebido>>
+    hourlyProfileKw   : Array<Float>
+    createdAt         : DateTime
+    updatedAt         : DateTime
+  }
+
+  entity "modes  (embebido)" as MODO {
+    name          : String
+    averagePowerW : Float
+    maxPowerW     : Float
+  }
+
+  entity "shadow_profile" as SHD {
+    _id       : ObjectId <<PK>>
+    --
+    _key      : String
+    slots     : Array<obj> <<embebido>>
+    avgShadow : Float
+    avgProd   : Float
+    updatedAt : DateTime
+  }
+
+  entity "slots  (embebido)" as SLT {
+    hour         : Integer
+    shadowPct    : Float
+    prodOverride : Float
+  }
+}
+
+' ─────────────── TELEMETRÍA ───────────────
+package "Telemetría" #F2F5F8 {
+
+  entity "lecturas_historicas" as LEC {
+    _id          : ObjectId <<PK>>
+    --
+    timestamp    : DateTime
+    production   : Float
+    consumption  : Float
+    batteryLevel : Float
+    gridExport   : Float
+    gridImport   : Float
+    efficiency   : Float
+    weather      : Object
+    createdAt    : DateTime
+  }
+}
+
+' ─────────────── CONFIGURACIÓN Y CLIMA ───────────────
+package "Configuración y clima" #F2F5F8 {
+
+  entity "ubicacion_config" as UBI {
+    _id       : ObjectId <<PK>>
+    --
+    _key      : String
+    lat       : Float
+    lon       : Float
+    name      : String
+    updatedAt : DateTime
+  }
+
+  entity "weather_sources" as WTH {
+    _id            : ObjectId <<PK>>
+    --
+    name           : String
+    baseUrl        : String
+    authType       : String
+    queryParams    : Object
+    fieldMapping   : Object
+    locationName   : String
+    enabled        : Boolean
+    isActive       : Boolean
+    createdAt      : DateTime
+    updatedAt      : DateTime
+  }
+
+  entity "consumption_profiles" as CPER {
+    _id       : ObjectId <<PK>>
+    --
+    name      : String
+    weekday   : Array<Float>
+    weekend   : Array<Float>
+    isActive  : Boolean
+    createdAt : DateTime
+    updatedAt : DateTime
+  }
+}
+
+' ─────────────── USUARIOS ───────────────
+package "Usuarios y acceso" #F2F5F8 {
+
+  entity "usuarios" as USR {
+    _id             : ObjectId <<PK>>
+    --
+    email           : String
+    name            : String
+    role            : String
+    passwordHash    : String
+    authProvider    : String
+    lastLdapLoginAt : DateTime
+    createdAt       : DateTime
+    updatedAt       : DateTime
+  }
+
+  entity "invitation_codes" as COD {
+    _id       : ObjectId <<PK>>
+    --
+    code      : String
+    role      : String
+    isUsed    : Boolean
+    createdBy : String <<FK>>
+    usedBy    : String <<FK>>
+    createdAt : DateTime
+    updatedAt : DateTime
+  }
+}
+
+' ─────────────── RELACIONES ───────────────
+ELEC *-- MODO : modes[]
+SHD  *-- SLT  : slots[]
+USR  ||--o{ COD : "email → createdBy / usedBy"
+
+@enduml

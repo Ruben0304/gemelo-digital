@@ -1,0 +1,37 @@
+@startuml fig_flujo_generacion
+' Flujo de datos (Tuberías y Filtros) — predicción de generación y demanda
+' Actividades = rectángulos redondeados (card). Objetos = rectángulos rectos que salen del flujo.
+!include _estilo_cujae.puml
+skinparam card {
+  BackgroundColor #FAFAFA
+  BorderColor #2C3E50
+  FontColor #1A1A2E
+  RoundCorner 16
+}
+skinparam rectangle {
+  BackgroundColor #EAF1F7
+  BorderColor #1A3A5C
+  FontColor #1A3A5C
+  RoundCorner 0
+}
+
+' Actividades (flujo principal)
+card "Cargar datos crudos\n(generación, consumo, carga)" as A
+card "Unir con meteorología\nhistórica y pronosticada" as B
+card "Normalizar y limpiar\nvariables para el modelo" as C
+card "Ejecutar modelos\nde predicción" as D
+card "Derivar métricas\n(autonomía, indicadores de riesgo)" as E
+
+' Objetos (se consultan / producen durante el flujo)
+rectangle "Pronóstico\ngenerado" as O1
+rectangle "Informe\nfinal" as O2
+
+A -right-> B
+B -right-> C
+C -right-> D
+D -right-> E
+
+D .down.> O1
+E .down.> O2
+
+@enduml

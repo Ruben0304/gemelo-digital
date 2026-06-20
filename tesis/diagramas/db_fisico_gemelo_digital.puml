@@ -1,0 +1,233 @@
+@startuml db_fisico_gemelo_digital
+!theme plain
+hide circle
+skinparam linetype polyline
+skinparam dpi 160
+skinparam defaultFontName "Arial"
+skinparam defaultFontSize 9
+skinparam nodesep 20
+skinparam ranksep 35
+skinparam classAttributeIconSize 0
+
+skinparam entity {
+  BackgroundColor #FAFAFA
+  BorderColor #2C3E50
+  HeaderBackgroundColor #1A3A5C
+  FontColor White
+  FontSize 10
+  FontStyle Bold
+  AttributeFontColor #1A1A2E
+  AttributeFontSize 8
+}
+
+skinparam arrow {
+  Color #2C3E50
+  FontColor #444444
+  FontSize 8
+}
+
+' ─────────────────── COLUMN 1 ───────────────────
+
+entity "users" as USR {
+  _id             : ObjectId <<PK>>
+  --
+  email           : String
+  name            : String
+  role            : String
+  passwordHash    : String
+  authProvider    : String
+  lastLdapLoginAt : DateTime
+  createdAt       : DateTime
+  updatedAt       : DateTime
+}
+
+entity "invitation_codes" as COD {
+  _id       : ObjectId <<PK>>
+  --
+  createdBy : String <<FK>>
+  usedBy    : String <<FK>>
+  code      : String
+  role      : String
+  isUsed    : Boolean
+  createdAt : DateTime
+  updatedAt : DateTime
+}
+
+entity "appliances" as ELEC {
+  _id               : ObjectId <<PK>>
+  --
+  name              : String
+  category          : String
+  averagePowerW     : Float
+  maxPowerW         : Float
+  measuredPowerW    : Float
+  quantity          : Integer
+  activeHours       : Float
+  selectedModeIndex : Integer
+  alwaysOn          : Boolean
+  hourlyProfileKw   : Array[Float]
+  createdAt         : DateTime
+  updatedAt         : DateTime
+}
+
+entity "appliance_modes" as MODO {
+  _id            : ObjectId <<PK>>
+  --
+  appliance_id   : ObjectId <<FK>>
+  name           : String
+  averagePowerW  : Float
+  maxPowerW      : Float
+}
+
+' ─────────────────── COLUMN 2 ───────────────────
+
+entity "panels" as PAN {
+  _id               : ObjectId <<PK>>
+  --
+  manufacturer      : String
+  model             : String
+  ratedPowerKw      : Float
+  quantity          : Integer
+  tiltDegrees       : Float
+  orientation       : String
+  efficiencyPercent : Float
+  areaM2            : Float
+  createdAt         : DateTime
+  updatedAt         : DateTime
+}
+
+entity "batteries" as BAT {
+  _id                        : ObjectId <<PK>>
+  --
+  manufacturer               : String
+  model                      : String
+  capacityKwh                : Float
+  quantity                   : Integer
+  maxDepthOfDischargePercent : Float
+  chargeRateKw               : Float
+  dischargeRateKw            : Float
+  efficiencyPercent          : Float
+  createdAt                  : DateTime
+  updatedAt                  : DateTime
+}
+
+entity "inverters" as INV {
+  _id               : ObjectId <<PK>>
+  --
+  manufacturer      : String
+  model             : String
+  ratedPowerKw      : Float
+  quantity          : Integer
+  efficiencyPercent : Float
+  createdAt         : DateTime
+  updatedAt         : DateTime
+}
+
+entity "shadow_profile" as SHD {
+  _id       : ObjectId <<PK>>
+  --
+  _key      : String
+  avgShadow : Float
+  avgProd   : Float
+  updatedAt : DateTime
+}
+
+entity "shadow_slots" as SLT {
+  _id          : ObjectId <<PK>>
+  --
+  shadow_id    : ObjectId <<FK>>
+  hour         : Integer
+  shadowPct    : Float
+  prodOverride : Float
+}
+
+' ─────────────────── COLUMN 3 ───────────────────
+
+entity "historical_readings" as LEC {
+  _id          : ObjectId <<PK>>
+  --
+  timestamp    : DateTime
+  production   : Float
+  consumption  : Float
+  batteryLevel : Float
+  gridExport   : Float
+  gridImport   : Float
+  efficiency   : Float
+  weather      : Object
+  createdAt    : DateTime
+}
+
+entity "weather_sources" as WTH {
+  _id            : ObjectId <<PK>>
+  --
+  name           : String
+  baseUrl        : String
+  authType       : String
+  authHeaderName : String
+  authQueryName  : String
+  authValue      : String
+  queryParams    : Object
+  fieldMapping   : Object
+  locationName   : String
+  enabled        : Boolean
+  isActive       : Boolean
+  createdAt      : DateTime
+  updatedAt      : DateTime
+}
+
+entity "location_config" as UBI {
+  _id       : ObjectId <<PK>>
+  --
+  _key      : String
+  lat       : Float
+  lon       : Float
+  name      : String
+  updatedAt : DateTime
+}
+
+entity "consumption_profiles" as CPER {
+  _id       : ObjectId <<PK>>
+  --
+  name      : String
+  weekday   : Array[Float]
+  weekend   : Array[Float]
+  isActive  : Boolean
+  createdAt : DateTime
+  updatedAt : DateTime
+}
+
+' ─────────────────── LAYOUT (hidden edges) ───────────────────
+
+' Vertical — column 1
+USR  -[hidden]down- COD
+COD  -[hidden]down- ELEC
+ELEC -[hidden]down- MODO
+
+' Vertical — column 2
+PAN  -[hidden]down- BAT
+BAT  -[hidden]down- INV
+INV  -[hidden]down- SHD
+SHD  -[hidden]down- SLT
+
+' Vertical — column 3
+LEC  -[hidden]down- WTH
+WTH  -[hidden]down- UBI
+UBI  -[hidden]down- CPER
+
+' Horizontal — row alignment
+USR  -[hidden]right- PAN
+PAN  -[hidden]right- LEC
+COD  -[hidden]right- BAT
+BAT  -[hidden]right- WTH
+ELEC -[hidden]right- INV
+INV  -[hidden]right- UBI
+MODO -[hidden]right- SHD
+SHD  -[hidden]right- CPER
+
+' ─────────────────── RELATIONSHIPS ───────────────────
+
+USR  ||--o{ COD
+ELEC ||--o{ MODO
+SHD  ||--|{ SLT
+
+@enduml

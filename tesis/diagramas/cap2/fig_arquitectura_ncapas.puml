@@ -1,0 +1,65 @@
+@startuml fig_arquitectura_ncapas
+' Arquitectura en N-capas del gemelo digital (estado actual: GraphQL, sin REST de datos)
+!include _estilo_cujae.puml
+skinparam componentStyle rectangle
+
+title Arquitectura en N-capas del gemelo digital web
+
+package "Capa de presentación — Cliente web" as L1 {
+  component "Next.js 15 / React 19\nDashboard · Ajustes · Simuladores" as UI
+  component "Recharts\n(gráficos)" as RC
+  component "Cliente urql\n(GraphQL)" as URQL
+  UI -down-> RC
+  UI -down-> URQL
+}
+
+package "Capa de comunicación — API" as L2 {
+  component "GraphQL (Strawberry)\nendpoint /graphql" as GQL
+  component "Endpoint REST único\nPOST /api/classify-panel" as REST
+}
+
+package "Capa de servicios de dominio — FastAPI" as L3 {
+  component "Telemetría\n(lectura_service,\nsolar_service)" as S_TEL
+  component "Inventario CRUD\n(paneles, baterías,\ninversores, cargas)" as S_INV
+  component "Clima\n(weather_service,\nweather_source)" as S_CLI
+  component "Configuración\ndel sistema" as S_CFG
+  component "Autenticación\n(JWT · LDAP ·\ninvitaciones)" as S_AUTH
+}
+
+package "Capa de analítica e IA" as L4 {
+  component "Predicción generación\nHavana v1 (Random Forest)\n+ pvlib" as M_SOL
+  component "Predicción consumo\n(Random Forest)" as M_CON
+  component "Autonomía de baterías\n(simulación)" as M_BAT
+  component "Clasificación limpieza\nMobileNetV2 (TensorFlow)" as M_CNN
+}
+
+database "Capa de persistencia\nMongoDB — GemeloDigitalCujai\n(12 colecciones)" as DB
+
+package "Servicios externos" as EXT {
+  component "API Open-Meteo" as OM
+  component "Directorio LDAP" as LDAP
+}
+
+URQL --> GQL
+UI ..> REST : imagen de panel
+GQL --> S_TEL
+GQL --> S_INV
+GQL --> S_CLI
+GQL --> S_CFG
+GQL --> S_AUTH
+REST --> M_CNN
+
+S_TEL --> M_SOL
+S_TEL --> M_CON
+S_TEL --> M_BAT
+S_CLI --> OM
+S_AUTH --> LDAP
+
+S_TEL --> DB
+S_INV --> DB
+S_CLI --> DB
+S_CFG --> DB
+S_AUTH --> DB
+M_SOL ..> OM
+
+@enduml

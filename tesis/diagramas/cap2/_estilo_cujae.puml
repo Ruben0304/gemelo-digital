@@ -1,0 +1,58 @@
+' ───────────────────────────────────────────────────────────────
+' Estilo común para los diagramas del Capítulo 2 (Gemelo Digital)
+' Paleta coherente con db_fisico_gemelo_digital.puml (azul CUJAE)
+' Incluir con:  !include _estilo_cujae.puml
+' ───────────────────────────────────────────────────────────────
+!theme plain
+skinparam dpi 160
+skinparam defaultFontName "Arial"
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam nodesep 22
+skinparam ranksep 38
+skinparam roundCorner 8
+skinparam ArrowColor #2C3E50
+skinparam ArrowFontColor #444444
+skinparam ArrowFontSize 9
+
+skinparam rectangle {
+  BackgroundColor #FAFAFA
+  BorderColor #2C3E50
+  FontColor #1A1A2E
+  FontSize 11
+}
+skinparam package {
+  BackgroundColor #F2F5F8
+  BorderColor #1A3A5C
+  FontColor #1A3A5C
+  FontStyle Bold
+  FontSize 12
+}
+skinparam component {
+  BackgroundColor #FAFAFA
+  BorderColor #2C3E50
+  FontColor #1A1A2E
+}
+skinparam database {
+  BackgroundColor #EAF1F7
+  BorderColor #1A3A5C
+  FontColor #1A3A5C
+}
+skinparam node {
+  BackgroundColor #F2F5F8
+  BorderColor #1A3A5C
+  FontColor #1A3A5C
+}
+skinparam usecase {
+  BackgroundColor #FAFAFA
+  BorderColor #2C3E50
+  FontColor #1A1A2E
+}
+skinparam actor {
+  BackgroundColor #EAF1F7
+  BorderColor #1A3A5C
+}
+skinparam entity {
+  BackgroundColor #FAFAFA
+  BorderColor #2C3E50
+}

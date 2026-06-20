@@ -1,0 +1,49 @@
+@startuml fig_casos_uso
+' Diagrama UML de casos de uso del gemelo digital web (versión final aportada por los autores)
+!include _estilo_cujae.puml
+left to right direction
+
+title Casos de uso del gemelo digital web
+
+actor "API Clima\n(Servicio Externo)" as CLIMA
+actor "Operador" as OP
+actor "Administrador" as ADMIN
+actor "Sistema LDAP\n(Sistema Externo)" as LDAP
+
+ADMIN --|> OP
+
+rectangle "Gemelo Digital" {
+  usecase "Consultar Condiciones\nMeteorológicas Actuales" as UC_CLIMA
+  usecase "Consultar Generación\nde Energía" as UC_GEN
+  usecase "Consultar Datos\nHistóricos" as UC_HIST
+  usecase "Revisar Estado\nde Paneles" as UC_PAN
+  usecase "Iniciar Sesión" as UC_LOGIN
+  usecase "Iniciar con LDAP" as UC_LDAP
+  usecase "Gestionar Generación\nde Energía" as UC_GESTGEN
+  usecase "Gestionar Equipos\nInstalados" as UC_EQUIP
+  usecase "Gestionar Usuarios" as UC_USR
+  usecase "Gestionar Sistema\nEnergético Instalado" as UC_SIST
+}
+
+' Operador
+OP --> UC_CLIMA
+OP --> UC_GEN
+OP --> UC_HIST
+OP --> UC_PAN
+OP --> UC_LOGIN
+OP --> UC_GESTGEN
+
+' Administrador (además de lo heredado)
+ADMIN --> UC_EQUIP
+ADMIN --> UC_USR
+ADMIN --> UC_SIST
+
+' Relaciones include / extend
+UC_GEN  ..> UC_CLIMA : <<include>>
+UC_LDAP ..> UC_LOGIN : <<extend>>
+
+' Actores externos
+UC_CLIMA --> CLIMA
+LDAP --> UC_LDAP
+
+@enduml

@@ -1,0 +1,38 @@
+@startuml fig_patron_repositorio
+' Patrón Repositorio — MongoDB como almacén central y los servicios que lo consumen
+!include _estilo_cujae.puml
+left to right direction
+
+title Patrón Repositorio — repositorio central MongoDB y servicios de dominio
+
+package "Servicios de dominio (backend)" as SVCS #F2F5F8 {
+  component "lectura_service" as S1
+  component "panel / battery /\ninverter / appliance\n_service (CRUD)" as S2
+  component "weather_service /\nweather_source_service" as S3
+  component "location_config /\nconsumption_profile /\nshadow_profile_service" as S5
+  component "user_service /\ninvitation_service" as S6
+}
+
+database "Repositorio central — MongoDB\nGemeloDigitalCujai" as REPO {
+  frame "Colecciones" {
+    rectangle "lecturas_historicas" as C1
+    rectangle "paneles · baterias ·\ninversores · electrodomesticos" as C2
+    rectangle "weather_sources" as C3
+    rectangle "ubicacion_config ·\nconsumption_profiles ·\nshadow_profile" as C5
+    rectangle "usuarios ·\ninvitation_codes" as C6
+  }
+}
+
+S1 --> C1
+S2 --> C2
+S3 --> C3
+S5 --> C5
+S6 --> C6
+
+note bottom of REPO
+  Acceso centralizado a datos: cada servicio
+  encapsula la lógica de su dominio y trabaja
+  contra una visión consistente de la microrred.
+end note
+
+@enduml

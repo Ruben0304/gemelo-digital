@@ -1,0 +1,46 @@
+@startuml fig_flujo_operativo
+' Flujo de datos operativo general del gemelo digital (adquisición → analítica → presentación)
+!include _estilo_cujae.puml
+
+title Flujo de datos operativo del gemelo digital
+
+package "Adquisición de datos" #F2F5F8 {
+  component "API Open-Meteo\n(clima y pronóstico)" as A1
+  component "lecturas_historicas\n(telemetría)" as A2
+  component "Configuración\n(paneles, baterias,\nubicacion_config)" as A3
+}
+
+package "Analítica e inteligencia artificial" #EAF1F7 {
+  component "Predicción de generación\n(Havana v1)" as B1
+  component "Predicción de consumo\n(Random Forest)" as B2
+  component "Estimación de autonomía\n(simulación física)" as B3
+  component "Clasificación de limpieza\n(MobileNetV2)" as B4
+}
+
+package "Simulación y servicios de dominio" #F2F5F8 {
+  component "Balance energético\ny flujos de potencia" as C1
+  component "Alertas y\nrecomendaciones" as C2
+}
+
+package "Presentación" #EAF1F7 {
+  component "GraphQL → urql" as D1
+  component "Tablero web\n(Recharts)" as D2
+}
+
+A1 --> B1
+A1 --> B2
+A2 --> B1
+A2 --> B2
+A3 --> B1
+A3 --> B3
+B1 --> B3
+B2 --> B3
+B1 --> C1
+B2 --> C1
+B3 --> C2
+B4 --> C2
+C1 --> D1
+C2 --> D1
+D1 --> D2
+
+@enduml

@@ -48,3 +48,11 @@ htmlcov/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Tesis — binario grande del renderizador de diagramas (descargable, no se versiona)
+tesis/diagramas/tools/*.jar
+# Tesis — artefactos de compilación pandoc (se regeneran); se conserva outputs/final/
+tesis/outputs/debug/*
+!tesis/outputs/debug/.gitkeep
+tesis/outputs/release/*
+!tesis/outputs/release/.gitkeep

@@ -1,0 +1,53 @@
+@startuml fig_actividades_generacion
+' Diagrama de actividades — caso de uso "Consultar Generación de Energía"
+' Flujo real: todo pasa por GraphQL (no hay REST).
+!include _estilo_cujae.puml
+skinparam ActivityBackgroundColor #FAFAFA
+skinparam ActivityBorderColor #2C3E50
+skinparam ActivityDiamondBackgroundColor #EAF1F7
+skinparam ActivityDiamondBorderColor #1A3A5C
+skinparam SwimlaneTitleFontColor #1A3A5C
+skinparam SwimlaneTitleFontStyle Bold
+
+title Actividad — Consultar generación de energía
+
+|Operador|
+start
+:Solicita la generación de energía
+desde el tablero web;
+
+|#F2F5F8|Frontend (Next.js + urql)|
+:Emite consulta GraphQL
+(solar / predictions / ml_predict_next_hours);
+
+|#EAF1F7|Backend (FastAPI + Strawberry)|
+:Lee configuración del sistema
+(ubicacion_config, paneles);
+fork
+  :Consulta clima actual
+  (Open-Meteo);
+fork again
+  :Consulta pronóstico horario
+  (Open-Meteo);
+end fork
+:Calcula variables físicas con pvlib
+(build_features: clearsky, elevación,
+índices, factor de temperatura);
+:Ejecuta el modelo Havana v1
+(Random Forest);
+:Obtiene factor de capacidad (0–1);
+:Escala por la capacidad instalada
+leída de paneles → potencia en kW;
+:Recupera series históricas
+(lecturas_historicas);
+
+|Frontend (Next.js + urql)|
+:Integra generación, histórico y predicción;
+:Renderiza gráficos (Recharts);
+
+|Operador|
+:Visualiza generación actual,
+histórico y pronóstico;
+stop
+
+@enduml

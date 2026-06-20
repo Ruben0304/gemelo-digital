@@ -1,0 +1,35 @@
+@startuml fig_flujo_limpieza
+' Flujo de datos (Tuberías y Filtros) — clasificación de limpieza de paneles
+' Actividades = rectángulos redondeados (card). Objetos = rectángulos rectos que salen del flujo.
+!include _estilo_cujae.puml
+skinparam card {
+  BackgroundColor #FAFAFA
+  BorderColor #2C3E50
+  FontColor #1A1A2E
+  RoundCorner 16
+}
+skinparam rectangle {
+  BackgroundColor #EAF1F7
+  BorderColor #1A3A5C
+  FontColor #1A3A5C
+  RoundCorner 0
+}
+
+' Actividades (flujo principal)
+card "Recibir\nimagen" as A
+card "Ajustar\nimagen" as B
+card "Clasificar\n(CNN)" as C
+card "Producir salida\n(limpio / sucio)" as D
+
+' Objetos (se consultan / producen durante el flujo)
+rectangle "Imagen" as O1
+rectangle "Informe\nfinal" as O2
+
+A -right-> B
+B -right-> C
+C -right-> D
+
+B .up.> O1
+D .down.> O2
+
+@enduml
