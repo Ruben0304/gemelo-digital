@@ -11,7 +11,7 @@ La elección depende del horizonte de predicción, del volumen de datos y de los
 | Algoritmo | Familia | Uso en el gemelo | Característica clave |
 |---|---|---|---|
 | Árbol de decisión | Base | Bloque de los métodos de ensemble | Interpretable, pero propenso al sobreajuste |
-| Bosque aleatorio | Ensemble (*bagging*) | Predicción de generación y de consumo | Robusto; buen equilibrio exactitud–costo |
+| Random Forest | Ensemble (*bagging*) | Predicción de generación y de consumo | Robusto; buen equilibrio exactitud–costo |
 | Potenciación por gradiente (XGBoost) | Ensemble (*boosting*) | Alternativa de referencia | Alta exactitud; requiere más ajuste |
 | Redes neuronales profundas | Aprendizaje profundo | Alternativa de referencia | Modelan relaciones complejas; más datos y cómputo |
 | MobileNetV2 (CNN, *transfer learning*) | Aprendizaje profundo (visión) | Clasificación de limpieza de paneles | Ligera; equilibrio exactitud–inferencia |

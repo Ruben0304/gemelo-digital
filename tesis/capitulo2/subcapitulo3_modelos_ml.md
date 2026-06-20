@@ -10,7 +10,7 @@ El servicio de fuentes de clima integra proveedores meteorológicos con formatos
 
 ### Strategy (GoF)
 
-La predicción de producción admite algoritmos intercambiables tras una misma interfaz (Figura \ref{fig:strategy}): una estrategia física, basada en radiación, temperatura y nubosidad, y una estrategia de aprendizaje automático, el bosque aleatorio. El servicio opera sobre la abstracción, lo que permite comparar ambos enfoques y validar el modelo frente a la referencia física sin afectar al resto del sistema.
+La predicción de producción admite algoritmos intercambiables tras una misma interfaz (Figura \ref{fig:strategy}): una estrategia física, basada en radiación, temperatura y nubosidad, y una estrategia de aprendizaje automático, el Random Forest. El servicio opera sobre la abstracción, lo que permite comparar ambos enfoques y validar el modelo frente a la referencia física sin afectar al resto del sistema.
 
 ![Patrón Strategy en la predicción de producción solar.](../recursos/figuras/fig17_patron_strategy.png){#fig:strategy width=95%}
 

@@ -61,11 +61,11 @@ header-includes: |
   \pagestyle{plain}
   \makeatletter
   \renewcommand{\@makechapterhead}[1]{%
-    \vspace*{-14pt}{\parindent\z@\raggedright\normalfont
+    \vspace*{-58pt}{\parindent\z@\raggedright\normalfont
       \ifnum\c@secnumdepth>\m@ne\huge\bfseries\@chapapp\space\thechapter\par\nobreak\vskip 16\p@\fi
       \interlinepenalty\@M\Huge\bfseries #1\par\nobreak\vskip 26\p@}}
   \renewcommand{\@makeschapterhead}[1]{%
-    \vspace*{-14pt}{\parindent\z@\raggedright\normalfont
+    \vspace*{-58pt}{\parindent\z@\raggedright\normalfont
       \interlinepenalty\@M\Huge\bfseries #1\par\nobreak\vskip 26\p@}}
   \makeatother
 ---

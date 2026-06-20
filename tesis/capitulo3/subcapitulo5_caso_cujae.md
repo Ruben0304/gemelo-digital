@@ -4,7 +4,7 @@ Más allá de las pruebas, el sistema se ejecutó sobre la microrred de la CUJAE
 
 ![Tablero principal con el flujo energético, los indicadores de generación y el panel meteorológico.](../recursos/figuras/fig2_dashboard_generacion.png){#fig:dash-gen width=95%}
 
-El gráfico de producción frente a consumo (Figura \ref{fig:graf-gc}) superpone la generación prevista por el bosque aleatorio y la demanda estimada, con la energía diaria y el balance neto, lo que permite anticipar desajustes y picos antes de que ocurran. El panel meteorológico (Figura \ref{fig:clima}) integra las condiciones actuales y el pronóstico de Open-Meteo con la producción estimada para cada día.
+El gráfico de producción frente a consumo (Figura \ref{fig:graf-gc}) superpone la generación prevista por el Random Forest y la demanda estimada, con la energía diaria y el balance neto, lo que permite anticipar desajustes y picos antes de que ocurran. El panel meteorológico (Figura \ref{fig:clima}) integra las condiciones actuales y el pronóstico de Open-Meteo con la producción estimada para cada día.
 
 ![Predicción de producción fotovoltaica frente a consumo, con las métricas de energía y balance.](../recursos/figuras/fig3_grafico_generacion_consumo.png){#fig:graf-gc width=80%}
 

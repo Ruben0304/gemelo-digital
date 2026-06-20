@@ -26,7 +26,7 @@ Para comprobarla se define como **objetivo general** desarrollar un gemelo digit
     - Comparar las soluciones afines existentes, académicas y comerciales. *(Ambos.)*
     - Seleccionar las tecnologías de software adecuadas para el sistema. *(Fabián, backend y modelos; Rubén, frontend y visualización.)*
 
-2. Diseñar la solución de software del gemelo digital para una microrred fotovoltaica aislada, con su arquitectura, su modelo de datos y sus interfaces.
+2. Desarrollar la solución de software del gemelo digital para una microrred fotovoltaica aislada, con su arquitectura, su modelo de datos y sus interfaces.
 
     - Definir los requisitos funcionales y no funcionales y los casos de uso del sistema. *(Ambos.)*
     - Diseñar la arquitectura de software, con la separación entre el backend y el frontend. *(Fabián, vista backend; Rubén, vista frontend.)*
