@@ -116,18 +116,27 @@ function Table(tbl)
   if wide then latex = latex .. "{\\footnotesize\n" end
   latex = latex .. "\\begin{longtable}{" .. colspec .. "}\n"
 
-  latex = latex .. "\\hline\n"
+  -- Leyenda ARRIBA (norma): el caption va al inicio de la tabla. El encabezado
+  -- se declara en \endfirsthead y \endhead para que, si la tabla se fracciona
+  -- entre páginas, el título de columnas se repita en cada página.
+  if caption ~= "" then
+    latex = latex .. "\\caption{" .. caption .. "}" .. label .. "\\\\\n"
+  end
 
+  latex = latex .. "\\hline\n"
   for _, h in ipairs(headers) do
     latex = latex .. h .. " \\\\ \\hline\\hline\n"
   end
+  latex = latex .. "\\endfirsthead\n"
+
+  latex = latex .. "\\hline\n"
+  for _, h in ipairs(headers) do
+    latex = latex .. h .. " \\\\ \\hline\\hline\n"
+  end
+  latex = latex .. "\\endhead\n"
 
   for _, r in ipairs(bodies) do
     latex = latex .. r .. " \\\\ \\hline\n"
-  end
-
-  if caption ~= "" then
-    latex = latex .. "\\caption{" .. caption .. "}" .. label .. "\\\\\n"
   end
 
   latex = latex .. "\\end{longtable}\n"

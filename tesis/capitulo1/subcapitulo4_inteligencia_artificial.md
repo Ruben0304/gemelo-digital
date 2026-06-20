@@ -6,7 +6,17 @@ Las capacidades que distinguen a un gemelo digital eficaz, esto es, anticipar la
 
 El bloque de construcción de buena parte de estos algoritmos es el árbol de decisión: una estructura que divide los datos de forma sucesiva según umbrales sobre sus variables hasta llegar a una predicción, y que sirve tanto para regresión, es decir, estimar un valor como la potencia generada, como para clasificación, esto es, asignar una categoría como el estado de un panel [@breiman2001randomforests]. Un árbol aislado es fácil de interpretar, pero tiende a sobreajustarse, y de ahí surgen los métodos de ensemble, que combinan muchos árboles para ganar exactitud y robustez. El más extendido es Random Forest, que promedia árboles entrenados sobre muestras distintas de los datos [@breiman2001randomforests], junto con las variantes de potenciación por gradiente como XGBoost [@chen2016xgboost]. Frente a ellos, las redes neuronales profundas, sean recurrentes, convolucionales o híbridas, modelan relaciones más complejas a cambio de más datos y más cómputo [@wang2025bilstm; @zhu2024cnnlstm].
 
-La elección depende del horizonte de predicción, del volumen de datos y de los recursos disponibles [@leholo2026slrsolar]. Para horizontes de hasta veinticuatro horas, con volúmenes moderados de histórico y restricciones de cómputo razonables, la evidencia comparativa reciente sitúa a los métodos de ensemble, y a Random Forest en particular, como la opción más equilibrada [@roga2025dnn; @taha2025zafarana]. Esa es la familia que el sistema emplea en sus tareas de predicción.
+La elección depende del horizonte de predicción, del volumen de datos y de los recursos disponibles [@leholo2026slrsolar]. Para horizontes de hasta veinticuatro horas, con volúmenes moderados de histórico y restricciones de cómputo razonables, la evidencia comparativa reciente sitúa a los métodos de ensemble, y a Random Forest en particular, como la opción más equilibrada [@roga2025dnn; @taha2025zafarana]. Esa es la familia que el sistema emplea en sus tareas de predicción. La Tabla \ref{tbl:algoritmos} resume los algoritmos considerados y su papel en el gemelo digital.
+
+| Algoritmo | Familia | Uso en el gemelo | Característica clave |
+|---|---|---|---|
+| Árbol de decisión | Base | Bloque de los métodos de ensemble | Interpretable, pero propenso al sobreajuste |
+| Bosque aleatorio | Ensemble (*bagging*) | Predicción de generación y de consumo | Robusto; buen equilibrio exactitud–costo |
+| Potenciación por gradiente (XGBoost) | Ensemble (*boosting*) | Alternativa de referencia | Alta exactitud; requiere más ajuste |
+| Redes neuronales profundas | Aprendizaje profundo | Alternativa de referencia | Modelan relaciones complejas; más datos y cómputo |
+| MobileNetV2 (CNN, *transfer learning*) | Aprendizaje profundo (visión) | Clasificación de limpieza de paneles | Ligera; equilibrio exactitud–inferencia |
+
+: Algoritmos de aprendizaje automático considerados y su papel en el sistema. {#tbl:algoritmos}
 
 ### Predicción de la generación y la demanda
 

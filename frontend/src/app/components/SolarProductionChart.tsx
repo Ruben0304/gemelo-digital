@@ -133,7 +133,7 @@ export default function SolarProductionChart({
         </div>
         <p className="text-sm text-gray-600">
           {useMLPredictions
-            ? '7:00 AM - 10:00 PM usando modelo Random Forest entrenado (R²=0.854)'
+            ? '7:00 AM - 10:00 PM usando modelo Random Forest (Havana v1) entrenado con datos de La Habana (R²=0.79 en horas diurnas)'
             : '7:00 AM - 10:00 PM basadas en clima y especificaciones del sistema'}
         </p>
       </div>
@@ -240,7 +240,7 @@ export default function SolarProductionChart({
       </div>
       <p className="mt-4 text-xs text-gray-600">
         {useMLPredictions
-          ? 'Predicciones generadas con modelo de Machine Learning entrenado con datos históricos de Open-Meteo. RMSE=537kW, MAE=229kW.'
+          ? 'Predicciones generadas con un modelo Random Forest (Havana v1) entrenado con datos históricos de La Habana (PVGIS + Open-Meteo, 2010-2015). Error normalizado en horas diurnas: nRMSE=11.4%, nMAE=7.5%.'
           : 'Datos generados sin telemetría en vivo; el cálculo se alimenta únicamente de condiciones atmosféricas y características del arreglo.'}
       </p>
         </>

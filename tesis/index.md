@@ -7,7 +7,7 @@ author:
 tutors:
   - "Dr.C. Nayma Cepero Pérez"
   - "Ms.C. Ernesto Alberto Álvarez"
-institution: "Universidad Tecnológica de La Habana «José Antonio Echeverría» (CUJAE)"
+institution: "Universidad Tecnológica de La Habana \"José Antonio Echeverría\" (CUJAE)"
 faculty: "Facultad de Ingeniería Informática"
 career: "Ingeniería Informática"
 city: "La Habana, Cuba"
@@ -53,6 +53,9 @@ header-includes: |
   \usepackage{graphicx}
   \usepackage{textcomp}
   \usepackage{longtable}
+  \hyphenpenalty=10000
+  \exhyphenpenalty=10000
+  \emergencystretch=3em
   \AtBeginDocument{\renewcommand{\tablename}{Tabla}\renewcommand{\listtablename}{Índice de tablas}}
   \let\maketitle\relax
   \pagestyle{plain}

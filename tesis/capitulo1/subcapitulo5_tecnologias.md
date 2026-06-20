@@ -6,14 +6,15 @@ Los apartados anteriores identificaron las capacidades que requiere un gemelo di
 
 El componente de frontend se ocupa de la presentación del estado del gemelo digital al operador, de la interactividad de los controles y de la comunicación con los servicios de respaldo [@nextjs2024docs; @react2024docs]. En el ecosistema actual conviven varios *frameworks* maduros, con perfiles diferenciados en lenguaje base, paradigma de composición y ecosistema asociado. La Tabla \ref{tbl:frontend} sintetiza las alternativas analizadas.
 
-| Tecnología | Lenguaje base | Descripción y características relevantes |
-|---|---|---|
-| **Next.js** | React (TypeScript) | Framework *full-stack* con renderizado híbrido (SSR más hidratación), enrutador App Router, soporte nativo de rutas API y despliegue *serverless* inmediato; ecosistema React maduro y amplia documentación [@nextjs2024docs; @react2024docs] |
-| **Nuxt** | Vue.js | Equivalente conceptual a Next.js sobre Vue; soporta SSR, generación estática y SPA mediante el motor Nitro |
-| **SvelteKit** | Svelte | Basado en un compilador que produce *bundles* más ligeros que sus competidores; SSR con hidratación selectiva; ecosistema en crecimiento, menos extenso que React o Vue |
-| **Remix** | React | Centrado en patrones de carga de datos con *loaders* y *actions* del lado del servidor; comparte ecosistema con React, con una comunidad más reducida que la de Next.js |
+| Criterio | Next.js | Nuxt | SvelteKit | Remix |
+|---|---|---|---|---|
+| Lenguaje base | React / TS | Vue | Svelte | React / TS |
+| Renderizado híbrido (SSR) | Sí, nativo | Sí, nativo | Sí | Sí |
+| Madurez del ecosistema | Alta | Alta | Media | Media |
+| Soporte documental | Amplio | Amplio | Medio | Medio |
+| Curva de aprendizaje | Media | Media | Baja | Media |
 
-: Frameworks de frontend candidatos. {#tbl:frontend}
+: Comparación de *frameworks* de frontend según criterios de evaluación. {#tbl:frontend}
 
 Las cuatro alternativas son técnicamente viables para los requisitos planteados [@nextjs2024docs; @react2024docs]. Las diferencias dominantes residen en la madurez del ecosistema, en la curva de aprendizaje del equipo y en la calidad del soporte documental, criterios relevantes en un proyecto de pregrado con plazos acotados.
 
@@ -21,14 +22,15 @@ Las cuatro alternativas son técnicamente viables para los requisitos planteados
 
 El componente de backend aloja la lógica de negocio, expone los servicios de cálculo y predicción, integra los modelos de aprendizaje automático y media el acceso a la base de datos [@fastapi2024docs; @pedregosa2011sklearn]. Conviven *frameworks* basados en distintos lenguajes, con compromisos diferentes entre velocidad de desarrollo, desempeño y compatibilidad con el ecosistema científico. La Tabla \ref{tbl:backend} sintetiza las alternativas.
 
-| Tecnología | Lenguaje base | Descripción y características relevantes |
-|---|---|---|
-| **FastAPI** | Python | Framework ASGI asíncrono de alto desempeño; tipado nativo con *Pydantic* y validación automática; documentación OpenAPI generada; integración inmediata con el ecosistema científico de Python (scikit-learn, TensorFlow, pandas) [@fastapi2024docs] |
-| **Django** | Python | Framework monolítico maduro con ORM propio, panel de administración y autenticación de fábrica; convenciones rígidas que aceleran proyectos típicos pero limitan la integración asíncrona |
-| **Flask** | Python | Micro-framework minimalista; máxima flexibilidad, pero exige componer manualmente cada capa (autenticación, ORM, validación) |
-| **Express** | Node.js | Estándar *de facto* en Node; minimalista y basado en *middleware*; comparte runtime con el frontend pero carece del ecosistema científico de Python |
+| Criterio | FastAPI | Django | Flask | Express |
+|---|---|---|---|---|
+| Lenguaje | Python | Python | Python | Node.js |
+| Ecosistema científico (ML) | Alto | Alto | Alto | Bajo |
+| Modelo asíncrono | Sí (ASGI) | Limitado | Limitado | Sí |
+| Tipado y validación nativos | Sí (Pydantic) | Externo | Manual | Manual |
+| Documentación automática | Sí (OpenAPI) | Parcial | No | No |
 
-: Frameworks de backend candidatos. {#tbl:backend}
+: Comparación de *frameworks* de backend según criterios de evaluación. {#tbl:backend}
 
 La elección entre Python y Node.js responde sobre todo a la disponibilidad de bibliotecas científicas: el ecosistema de Python para aprendizaje automático y procesamiento numérico no tiene equivalente en JavaScript [@pedregosa2011sklearn; @fastapi2024docs]. Dentro de Python, FastAPI se ha consolidado frente a Django y Flask por su modelo asíncrono y su tipado nativo, alineados con un sistema integrado con componentes de aprendizaje automático.
 
@@ -36,14 +38,15 @@ La elección entre Python y Node.js responde sobre todo a la disponibilidad de b
 
 El componente de persistencia almacena la configuración del sistema (paneles, baterías, perfiles de consumo, programaciones) y los históricos operativos del monitoreo continuo [@cattell2011nosql; @mongodb2024docs]. Las alternativas pertenecen a tres familias estructurales, que resume la Tabla \ref{tbl:bd}.
 
-| Tecnología | Modelo | Descripción y características relevantes |
-|---|---|---|
-| **MongoDB** | NoSQL documental | Documentos JSON/BSON con esquema flexible; consultas ricas, índices secundarios y agregaciones; afinidad natural con los objetos de una aplicación web; *drivers* oficiales para Node.js y Python [@mongodb2024docs; @carvalho2023nosql] |
-| **PostgreSQL** | Relacional | SQL completo; garantías ACID e integridad referencial estricta; admite tipos JSON nativos pero conserva la rigidez relacional |
-| **InfluxDB** | Series temporales | Optimizada para ingesta masiva de eventos con marca temporal y consultas sobre ventanas de tiempo; retención y compresión nativas; lenguaje de consulta específico |
-| **TimescaleDB** | Híbrida (series temporales sobre PostgreSQL) | Extensión de PostgreSQL que añade capacidades de series temporales sin renunciar al modelo relacional ni a SQL |
+| Criterio | MongoDB | PostgreSQL | InfluxDB | TimescaleDB |
+|---|---|---|---|---|
+| Modelo de datos | Documental | Relacional | Series temp. | Híbrido |
+| Esquema flexible | Sí | Limitado | No | Limitado |
+| Idoneidad en series temporales | Media | Media | Alta | Alta |
+| Transaccionalidad | Básica | Estricta (ACID) | Limitada | Estricta |
+| Complejidad operativa | Baja | Media | Media | Media |
 
-: Sistemas gestores de bases de datos candidatos. {#tbl:bd}
+: Comparación de gestores de base de datos según criterios de evaluación. {#tbl:bd}
 
 La idoneidad de cada alternativa depende del perfil dominante de los datos. Cuando la carga combina lecturas temporales de frecuencia moderada con configuraciones de esquema evolutivo y no exige transaccionalidad estricta entre múltiples agregados, el modelo documental ofrece el mejor compromiso entre flexibilidad y desempeño [@carvalho2023nosql; @stonebraker2010sqlnosql]. Las bases de series temporales aportan ventajas cuando el volumen de eventos por unidad de tiempo es elevado, escenario que solo emerge en despliegues con instrumentación densa y prolongada.
 

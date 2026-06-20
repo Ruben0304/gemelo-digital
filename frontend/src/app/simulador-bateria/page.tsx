@@ -682,7 +682,7 @@ export default function SimuladorBateriaPage() {
                     <span className="font-semibold text-gray-900 tabular-nums">±{CONS_ERROR_PCT}%</span>
                   </div>
                   <p className="text-[11px] text-gray-400 leading-snug pt-2 border-t border-gray-100">
-                    Datos del notebook <code className="font-mono bg-gray-100 px-1 rounded">validacion_modelos_ml.ipynb</code> (Random Forest, R²=0.854).
+                    Modelo Random Forest <code className="font-mono bg-gray-100 px-1 rounded">Havana v1</code> de producción solar (R²=0.79 en horas diurnas).
                   </p>
                 </div>
               </Panel>

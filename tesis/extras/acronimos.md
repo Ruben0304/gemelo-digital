@@ -1,4 +1,4 @@
-# Lista de Acrónimos y Abreviaturas {.unnumbered}
+# Lista de Acrónimos y Abreviaturas {.unnumbered .unlisted}
 
 \begin{description}[leftmargin=3.5cm, style=nextline, font=\bfseries]
   \item[API] Application Programming Interface (interfaz de programación de aplicaciones)
@@ -6,7 +6,7 @@
   \item[CNN] Convolutional Neural Network (red neuronal convolucional)
   \item[CRUD] Create, Read, Update, Delete
   \item[CU] Caso de Uso
-  \item[CUJAE] Universidad Tecnológica de La Habana «José Antonio Echeverría»
+  \item[CUJAE] Universidad Tecnológica de La Habana "José Antonio Echeverría"
   \item[GoF] Gang of Four (catálogo de patrones de diseño)
   \item[GRASP] General Responsibility Assignment Software Patterns
   \item[GraphQL] Graph Query Language

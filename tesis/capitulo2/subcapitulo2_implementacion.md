@@ -22,11 +22,15 @@ El sistema separa con claridad dos aplicaciones (Figura \ref{fig:cliente-servido
 
 ![Patrón cliente–servidor del gemelo digital sobre la red local.](../recursos/figuras/fig9_patron_cliente_servidor.png){#fig:cliente-servidor width=70%}
 
-### Arquitectura en n-capas y reutilización
+El diagrama distingue dos nodos. En el lado del cliente, la aplicación Next.js que ejecutan el operador y el administrador agrupa las vistas del tablero, los formularios de configuración y los componentes de visualización. En el lado del servidor, el backend FastAPI reúne los *resolvers* que reciben las peticiones, los servicios de dominio (telemetría, predicción, inventario, clima, configuración y autenticación) y la capa de acceso a datos. El conector entre ambos es la API GraphQL sobre HTTPS, que transporta el token de autenticación en cada solicitud; el endpoint REST para la carga de imágenes es la única vía alternativa.
+
+### Arquitectura n-capas con enfoque basado en reutilización
 
 Dentro del servidor, el sistema se estructura en capas horizontales con responsabilidades delimitadas (Figura \ref{fig:ncapas}): una capa de vistas que ve el usuario; una capa general con los componentes de interfaz, el servicio de clima, la gestión de dispositivos y los servicios de aprendizaje automático; una capa intermedia con los frameworks de soporte (Next.js, la API GraphQL, FastAPI, MongoDB y Open-Meteo); y una capa de servicios del sistema con los protocolos de transporte. La separación en capas es la base de la **reutilización** del sistema: cada capa evoluciona de forma independiente mientras respete sus interfaces, los componentes de visualización (gráficos de series, tarjetas de indicadores, tablas) se reutilizan entre vistas, y el propio monolito modular es replicable en futuros proyectos de microrredes de la CUJAE.
 
 ![Arquitectura en n-capas del gemelo digital.](../recursos/figuras/fig8_arquitectura_ncapas.png){#fig:ncapas width=80%}
+
+El diagrama detalla el contenido de cada capa. La capa específica reúne las vistas que ve el usuario: inicio, históricos, administración y los simuladores. La capa general agrupa los componentes de interfaz reutilizables y los servicios de dominio: el servicio climatológico, la gestión de dispositivos y los servicios de aprendizaje automático de generación, consumo y limpieza. La capa intermedia contiene los *frameworks* y servicios de soporte (Next.js, la API GraphQL, FastAPI, MongoDB y la API Open-Meteo), y la capa de servicios del sistema, los protocolos de transporte (TCP/IP y HTTPS). La reutilización opera en dos sentidos: hacia dentro, los componentes de visualización y los servicios de dominio se reutilizan entre vistas; hacia afuera, la organización en capas hace replicable el monolito modular en futuros proyectos de microrredes.
 
 ### Flujo de datos: tuberías y filtros
 
@@ -36,11 +40,15 @@ La preparación y el análisis de datos para la inteligencia artificial se organ
 
 ![Flujo de datos para la clasificación de limpieza de paneles.](../recursos/figuras/fig13_flujo_clasificacion_limpieza.png){#fig:flujo-limpieza width=85%}
 
+Cada diagrama nombra los filtros encadenados. En la predicción, los filtros son la carga de los datos crudos de generación y consumo, la unión con la meteorología histórica y pronosticada, la limpieza y normalización de las variables, el cálculo de las características físicas con pvlib, la inferencia del modelo y la derivación de las métricas operativas (autonomía e indicadores de riesgo). En la clasificación, los filtros son la recepción de la imagen, su redimensionado y normalización al formato del modelo, la inferencia de la red convolucional y la emisión de la etiqueta con su medida de confianza.
+
 ### Patrón repositorio y diseño de la base de datos
 
 El acceso a los datos se organiza en torno a un almacén central mediante el patrón repositorio sobre MongoDB (Figura \ref{fig:repositorio}), que mantiene el inventario, la telemetría, la configuración y los usuarios. Centralizar el acceso reduce la duplicidad, permite validaciones coherentes y deja cambiar la persistencia sin afectar a la lógica de negocio, siempre que se conserve su interfaz [@mongodb2024docs].
 
 ![Patrón repositorio: MongoDB como almacén central del sistema.](../recursos/figuras/fig11_patron_repositorio.png){#fig:repositorio width=70%}
+
+El diagrama sitúa la base de datos documental como almacén central, alrededor del cual los servicios de dominio acceden a los datos a través de una interfaz común. Ningún componente manipula la conexión directamente: la obtiene de un único punto de acceso, lo que concentra la dependencia del gestor de base de datos en un solo lugar y permite cambiarlo sin afectar a la lógica de negocio.
 
 La base de datos, **GemeloDigital**, concentra toda la información en catorce colecciones organizadas en cuatro dominios (Figura \ref{fig:bd}). El dominio físico describe los activos: `paneles`, `baterias`, `inversores`, `electrodomesticos` (con sus modos de operación y perfil de consumo) y `shadow_profile` (el perfil de sombreado por hora). El dominio de telemetría y mediciones lo forman `lecturas_historicas` —la colección de mayor volumen, con la marca de tiempo, la potencia generada y consumida, el estado de carga, los flujos y la eficiencia, que sirve tanto para los históricos como para entrenar y validar los modelos— junto con `mediciones_equipos` y `mediciones_lotes`, que guardan las mediciones de consumo cargadas por equipo individual. El dominio de configuración y clima reúne `ubicacion_config`, `weather_sources` y `consumption_profiles`. Y el dominio de usuarios y acceso lo componen `usuarios`, `invitation_codes` —que implementa el registro controlado por códigos asociados a un rol— y `sessions`, que mantiene las sesiones de usuario. El modelo documental absorbe la evolución del esquema sin migraciones costosas, lo que encaja con el carácter heterogéneo y cambiante de los datos de la microrred [@mongodb2024docs; @carvalho2023nosql].
 

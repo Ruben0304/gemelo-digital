@@ -1,3 +1,3 @@
-# Fundamentos teóricos y estado del arte del gemelo digital para microrredes
+# Fundamentos teóricos del gemelo digital para microrredes
 
 Este capítulo reúne los fundamentos y el estado del arte sobre los que se apoya la solución. Comienza por describir qué es una microrred fotovoltaica aislada y qué exige su operación; sigue después la línea que conduce del monitoreo digital al gemelo digital y revisa las soluciones afines, académicas y comerciales, que ya existen; y termina examinando las técnicas de inteligencia artificial y las tecnologías de software pertinentes, para justificar cuáles se adoptan. El recorrido estrecha el foco desde el dominio general hacia las decisiones concretas que el Capítulo 2 desarrollará.

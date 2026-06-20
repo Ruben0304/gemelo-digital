@@ -1,6 +1,6 @@
-# Declaración de Autoría {.unnumbered}
+# Declaración de Autoría {.unnumbered .unlisted}
 
-Los autores del presente Trabajo de Diploma, titulado **«Gemelo digital para una microrred fotovoltaica aislada»**, declaramos que somos los únicos responsables del contenido aquí expuesto y autorizamos a la Universidad Tecnológica de La Habana «José Antonio Echeverría» (CUJAE) a hacer uso del mismo con la finalidad que estime conveniente.
+Los autores del presente Trabajo de Diploma, titulado **«Gemelo digital para una microrred fotovoltaica aislada»**, declaramos que somos los únicos responsables del contenido aquí expuesto y autorizamos a la Universidad Tecnológica de La Habana "José Antonio Echeverría" (CUJAE) a hacer uso del mismo con la finalidad que estime conveniente.
 
 \vspace{1.2cm}
 

@@ -379,7 +379,7 @@ export default function BatterySimulatorModal({
               </p>
               <p className="text-gray-500">
                 Por eso el gráfico muestra dos líneas punteadas — el rango realista en el que estará la batería.
-                Fuentes: modelo Random Forest de producción solar (R²=0.854) y de consumo (MAE=8.13 kW) validados en el notebook del backend.
+                Fuentes: modelo Random Forest de producción solar Havana v1 (R²=0.79 en horas diurnas) y modelo de consumo, validados en el backend.
               </p>
             </div>
           </section>
