@@ -11,6 +11,7 @@ import {
   DELETE_APPLIANCE_BATCH_MUTATION,
 } from '@/lib/graphql-queries';
 import ConfirmDialog from './ConfirmDialog';
+import { useToast } from './ToastProvider';
 
 interface AppliancesManagerProps {
   appliances: ApplianceConfig[];
@@ -213,6 +214,7 @@ export default function AppliancesManager({
   systemConfig,
   onRefresh,
 }: AppliancesManagerProps) {
+  const toast = useToast();
   const [message, setMessage] = useState<StatusMessage>(null);
   const [confirmState, setConfirmState] = useState<{ message: string; onConfirm: () => void } | null>(null);
   const [modalMessage, setModalMessage] = useState<StatusMessage>(null);
@@ -432,6 +434,7 @@ export default function AppliancesManager({
         applianceId = created?.createAppliance?._id;
       }
 
+      toast.success(form._id ? 'Electrodoméstico actualizado correctamente.' : 'Electrodoméstico creado correctamente.');
       setMessage({
         type: 'success',
         text: form._id
@@ -443,13 +446,9 @@ export default function AppliancesManager({
       await onRefresh?.();
     } catch (error) {
       console.error(error);
-      setModalMessage({
-        type: 'error',
-        text:
-          error instanceof Error
-            ? error.message
-            : 'Error inesperado al guardar el electrodoméstico.',
-      });
+      const text = error instanceof Error ? error.message : 'Error inesperado al guardar el electrodoméstico.';
+      toast.error(text);
+      setModalMessage({ type: 'error', text });
     } finally {
       setLoading(false);
     }
@@ -468,14 +467,14 @@ export default function AppliancesManager({
       onConfirm: async () => {
         try {
           await executeMutation(DELETE_APPLIANCE_MUTATION, { id: appliance._id });
+          toast.success('Electrodoméstico eliminado correctamente.');
           setMessage({ type: 'success', text: 'Electrodoméstico eliminado correctamente.' });
           await onRefresh?.();
         } catch (error) {
           console.error(error);
-          setMessage({
-            type: 'error',
-            text: error instanceof Error ? error.message : 'No se pudo eliminar el electrodoméstico.',
-          });
+          const text = error instanceof Error ? error.message : 'No se pudo eliminar el electrodoméstico.';
+          toast.error(text);
+          setMessage({ type: 'error', text });
         }
       },
     });

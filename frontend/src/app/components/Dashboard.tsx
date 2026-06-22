@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import AdminPanel from './AdminPanel';
+import { DashboardSkeleton } from './Skeleton';
 import SolarProductionChart from './SolarProductionChart';
 import BatteryStatus from './BatteryStatus';
 import WeatherToday, { LottieAnimationType } from './WeatherToday';
@@ -859,11 +860,12 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundImage: 'linear-gradient(to bottom right, #e0f2fe, #ffffff, #dbeafe)' }}>
-        <div className="text-center">
-          <ArrowPathIcon className="w-12 h-12 text-green-500 animate-spin mx-auto mb-4" />
-          <p className="text-gray-600 text-lg">Cargando Gemelo Digital…</p>
+      <div className="min-h-screen" style={{ backgroundImage: 'linear-gradient(to bottom right, #e0f2fe, #ffffff, #dbeafe)' }}>
+        <div className="mx-auto flex w-full max-w-7xl items-center gap-3 px-4 pt-6 sm:px-6">
+          <ArrowPathIcon className="h-5 w-5 animate-spin text-green-500" />
+          <p className="text-sm text-gray-500">Cargando Gemelo Digital…</p>
         </div>
+        <DashboardSkeleton />
       </div>
     );
   }

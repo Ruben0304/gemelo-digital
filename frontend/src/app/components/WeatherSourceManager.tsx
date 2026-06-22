@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CloudSun, Link2, WandSparkles } from 'lucide-react';
 import { executeMutation, executeQuery } from '@/lib/graphql-client';
+import { useToast } from './ToastProvider';
 import ConfirmDialog from './ConfirmDialog';
 
 type StatusMessage = { type: 'success' | 'error'; text: string } | null;
@@ -373,6 +374,7 @@ const sourceToForm = (source: WeatherSource): SourceFormState => ({
 });
 
 export default function WeatherSourceManager({ onSaved }: WeatherSourceManagerProps) {
+  const toast = useToast();
   const [form, setForm] = useState<SourceFormState>(emptyForm);
   const [sources, setSources] = useState<WeatherSource[]>([]);
   const [status, setStatus] = useState<StatusMessage>(null);
@@ -605,14 +607,14 @@ export default function WeatherSourceManager({ onSaved }: WeatherSourceManagerPr
         input,
       });
 
+      toast.success(`Fuente guardada: ${data.saveWeatherSource.name}`);
       setStatus({ type: 'success', text: `Fuente guardada: ${data.saveWeatherSource.name}` });
       await loadSources();
       await onSaved?.();
     } catch (error) {
-      setStatus({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'No se pudo guardar la fuente.',
-      });
+      const text = error instanceof Error ? error.message : 'No se pudo guardar la fuente.';
+      toast.error(text);
+      setStatus({ type: 'error', text });
     } finally {
       setLoading(false);
     }
@@ -625,12 +627,12 @@ export default function WeatherSourceManager({ onSaved }: WeatherSourceManagerPr
       await executeMutation(ACTIVATE_MUTATION, { id });
       await loadSources();
       await onSaved?.();
+      toast.success('Fuente activada.');
       setStatus({ type: 'success', text: 'Fuente activada.' });
     } catch (error) {
-      setStatus({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'No se pudo activar la fuente.',
-      });
+      const text = error instanceof Error ? error.message : 'No se pudo activar la fuente.';
+      toast.error(text);
+      setStatus({ type: 'error', text });
     } finally {
       setLoading(false);
     }
@@ -645,12 +647,12 @@ export default function WeatherSourceManager({ onSaved }: WeatherSourceManagerPr
         try {
           await executeMutation(DELETE_MUTATION, { id });
           await loadSources();
+          toast.success('Fuente eliminada.');
           setStatus({ type: 'success', text: 'Fuente eliminada.' });
         } catch (error) {
-          setStatus({
-            type: 'error',
-            text: error instanceof Error ? error.message : 'No se pudo eliminar la fuente.',
-          });
+          const text = error instanceof Error ? error.message : 'No se pudo eliminar la fuente.';
+          toast.error(text);
+          setStatus({ type: 'error', text });
         } finally {
           setLoading(false);
         }

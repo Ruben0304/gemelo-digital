@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { executeQuery, executeMutation } from '@/lib/graphql-client';
+import { useToast } from './ToastProvider';
 import { User } from '@/types';
 import {
     UserGroupIcon,
@@ -97,6 +98,7 @@ const GENERATE_CODE_MUTATION = `
 `;
 
 export default function AdminPanel({ currentUser, onBack, onLogout }: AdminPanelProps) {
+    const toast = useToast();
     const [users, setUsers] = useState<User[]>([]);
     const [codes, setCodes] = useState<InvitationCode[]>([]);
     const [sessions, setSessions] = useState<ActiveSession[]>([]);
@@ -142,8 +144,10 @@ export default function AdminPanel({ currentUser, onBack, onLogout }: AdminPanel
                 return;
             }
             setSessions((prev) => prev.filter((s) => s._id !== id));
+            toast.success('Sesión revocada.');
         } catch (err) {
             console.error('Error al revocar sesión:', err);
+            toast.error('No se pudo revocar la sesión.');
         } finally {
             setRevokingId(null);
         }
@@ -154,8 +158,10 @@ export default function AdminPanel({ currentUser, onBack, onLogout }: AdminPanel
         try {
             await executeMutation(DELETE_USER_MUTATION, { id });
             await fetchData();
+            toast.success('Usuario eliminado.');
         } catch (err) {
             console.error('Error al eliminar usuario:', err);
+            toast.error('No se pudo eliminar el usuario.');
         } finally {
             setDeletingUserId(null);
         }
@@ -174,9 +180,11 @@ export default function AdminPanel({ currentUser, onBack, onLogout }: AdminPanel
                 createdBy: currentUser.email,
             });
             await fetchData();
+            toast.success('Código de invitación generado.');
         } catch (error) {
             console.error('Error generating code:', error);
             setGenError('No se pudo generar el código.');
+            toast.error('No se pudo generar el código.');
         } finally {
             setGenerating(false);
         }

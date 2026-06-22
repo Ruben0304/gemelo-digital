@@ -495,61 +495,6 @@ class TestGraphQLUbicacion:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Apagones — query y mutation
-# ─────────────────────────────────────────────────────────────────────────────
-
-CREATE_BLACKOUT = """
-mutation($input: BlackoutInput!) {
-  createBlackout(input: $input) {
-    _id
-    date
-    province
-  }
-}
-"""
-
-LIST_BLACKOUTS = "query { blackouts { _id date province } }"
-
-_BLACKOUT = {
-    "date": "2024-06-15",
-    "intervals": [
-        {"start": "2024-06-15T10:00:00", "end": "2024-06-15T12:00:00"}
-    ],
-    "province": "La Habana",
-}
-
-
-class TestGraphQLApagones:
-
-    def test_listar_apagones_vacio(self, anon):
-        r = anon.execute(LIST_BLACKOUTS)
-        assert r["data"]["blackouts"] == []
-
-    def test_admin_puede_crear_apagon(self, admin):
-        r = admin.execute(CREATE_BLACKOUT, {"input": _BLACKOUT})
-        assert not _has_errors(r)
-        assert r["data"]["createBlackout"]["province"] == "La Habana"
-
-    def test_crear_y_listar_apagon(self, admin):
-        admin.execute(CREATE_BLACKOUT, {"input": _BLACKOUT})
-        r = admin.execute(LIST_BLACKOUTS)
-        assert len(r["data"]["blackouts"]) == 1
-        assert r["data"]["blackouts"][0]["province"] == "La Habana"
-
-    def test_anonimo_no_puede_crear_apagon(self, anon):
-        r = anon.execute(CREATE_BLACKOUT, {"input": _BLACKOUT})
-        assert _rejected(r, "createBlackout")
-
-    def test_user_no_puede_crear_apagon(self, user):
-        r = user.execute(CREATE_BLACKOUT, {"input": _BLACKOUT})
-        assert _rejected(r, "createBlackout")
-
-    def test_listar_apagones_es_publico(self, anon):
-        r = anon.execute(LIST_BLACKOUTS)
-        assert not _has_errors(r)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Códigos de invitación
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1267,14 +1212,16 @@ class TestGraphQLMedidasElectrodomestico:
 # Historial — historicalReadings + dailySummaries + seedHistoricalData
 # ─────────────────────────────────────────────────────────────────────────────
 
+# El historial almacena solo producción (productionKw); los resúmenes solo
+# totales de producción. El seed inserta lecturas cada 5 min (24 × 12 por día).
+INTERVALS_PER_DAY = 24 * 12
+
 QUERY_HISTORICAL = """
 query($limit: Int) {
   historicalReadings(limit: $limit) {
     _id
     timestamp
-    production
-    consumption
-    batteryLevel
+    productionKw
   }
 }
 """
@@ -1283,9 +1230,8 @@ QUERY_DAILY_SUMMARIES = """
 query($days: Int) {
   dailySummaries(days: $days) {
     date
-    totalProduction
-    totalConsumption
-    avgBatteryLevel
+    totalProductionKwh
+    maxProductionKw
     readingCount
   }
 }
@@ -1308,7 +1254,7 @@ class TestGraphQLHistorial:
     def test_seed_inserta_datos(self, admin):
         r = admin.execute(SEED_HISTORICAL, {"days": 2})
         assert not _has_errors(r)
-        assert r["data"]["seedHistoricalData"] == 2 * 24
+        assert r["data"]["seedHistoricalData"] == 2 * INTERVALS_PER_DAY
 
     def test_historico_con_datos_retorna_lecturas(self, admin):
         admin.execute(SEED_HISTORICAL, {"days": 2})
@@ -1320,14 +1266,14 @@ class TestGraphQLHistorial:
         admin.execute(SEED_HISTORICAL, {"days": 1})
         r = admin.execute(QUERY_HISTORICAL, {"limit": 1})
         reading = r["data"]["historicalReadings"][0]
-        for field in ["_id", "timestamp", "production", "consumption", "batteryLevel"]:
+        for field in ["_id", "timestamp", "productionKw"]:
             assert field in reading
 
     def test_historico_produccion_no_negativa(self, admin):
         admin.execute(SEED_HISTORICAL, {"days": 2})
         r = admin.execute(QUERY_HISTORICAL, {"limit": 48})
         for reading in r["data"]["historicalReadings"]:
-            assert reading["production"] >= 0
+            assert reading["productionKw"] >= 0
 
     def test_resumenes_vacio_retorna_lista_vacia(self, admin):
         r = admin.execute(QUERY_DAILY_SUMMARIES, {"days": 7})
@@ -1344,7 +1290,7 @@ class TestGraphQLHistorial:
         admin.execute(SEED_HISTORICAL, {"days": 2})
         r = admin.execute(QUERY_DAILY_SUMMARIES, {"days": 5})
         summary = r["data"]["dailySummaries"][0]
-        for field in ["date", "totalProduction", "totalConsumption", "avgBatteryLevel", "readingCount"]:
+        for field in ["date", "totalProductionKwh", "maxProductionKw", "readingCount"]:
             assert field in summary
 
     def test_resumenes_dias_parametro(self, admin):

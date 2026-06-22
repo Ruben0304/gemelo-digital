@@ -31,6 +31,7 @@ import { executeMutation } from '@/lib/graphql-client';
 import AppliancesManager from './AppliancesManager';
 import WeatherSourceManager from './WeatherSourceManager';
 import ConfirmDialog from './ConfirmDialog';
+import { useToast } from './ToastProvider';
 
 export type SettingsView =
   | 'home'
@@ -278,6 +279,7 @@ export default function DevicesView({
   onRefresh,
   forcedSettingsView,
 }: DevicesViewProps) {
+  const toast = useToast();
   const [panelMessage, setPanelMessage] = useState<StatusMessage>(null);
   const [panelModalMessage, setPanelModalMessage] = useState<StatusMessage>(null);
   const [panelModalOpen, setPanelModalOpen] = useState(false);
@@ -559,6 +561,7 @@ export default function DevicesView({
       } else {
         await executeMutation(CREATE_PANEL_MUTATION, { input: payload });
       }
+      toast.success(panelForm._id ? 'Panel actualizado correctamente.' : 'Panel creado correctamente.');
       setPanelMessage({
         type: 'success',
         text: panelForm._id
@@ -570,10 +573,9 @@ export default function DevicesView({
       await onRefresh?.();
     } catch (error) {
       console.error(error);
-      setPanelModalMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'Error inesperado al guardar el panel.',
-      });
+      const text = error instanceof Error ? error.message : 'Error inesperado al guardar el panel.';
+      toast.error(text);
+      setPanelModalMessage({ type: 'error', text });
     } finally {
       setPanelLoading(false);
     }
@@ -602,6 +604,7 @@ export default function DevicesView({
       } else {
         await executeMutation(CREATE_BATTERY_MUTATION, { input: payload });
       }
+      toast.success(batteryForm._id ? 'Batería actualizada correctamente.' : 'Batería creada correctamente.');
       setBatteryMessage({
         type: 'success',
         text: batteryForm._id
@@ -613,11 +616,9 @@ export default function DevicesView({
       await onRefresh?.();
     } catch (error) {
       console.error(error);
-      setBatteryModalMessage({
-        type: 'error',
-        text:
-          error instanceof Error ? error.message : 'Error inesperado al guardar la batería.',
-      });
+      const text = error instanceof Error ? error.message : 'Error inesperado al guardar la batería.';
+      toast.error(text);
+      setBatteryModalMessage({ type: 'error', text });
     } finally {
       setBatteryLoading(false);
     }
@@ -643,6 +644,7 @@ export default function DevicesView({
       } else {
         await executeMutation(CREATE_INVERTER_MUTATION, { input: payload });
       }
+      toast.success(inverterForm._id ? 'Inversor actualizado correctamente.' : 'Inversor creado correctamente.');
       setInverterMessage({
         type: 'success',
         text: inverterForm._id
@@ -654,11 +656,9 @@ export default function DevicesView({
       await onRefresh?.();
     } catch (error) {
       console.error(error);
-      setInverterModalMessage({
-        type: 'error',
-        text:
-          error instanceof Error ? error.message : 'Error inesperado al guardar el inversor.',
-      });
+      const text = error instanceof Error ? error.message : 'Error inesperado al guardar el inversor.';
+      toast.error(text);
+      setInverterModalMessage({ type: 'error', text });
     } finally {
       setInverterLoading(false);
     }
@@ -677,6 +677,7 @@ export default function DevicesView({
       onConfirm: async () => {
         try {
           await executeMutation(DELETE_PANEL_MUTATION, { id: panel._id });
+          toast.success('Panel eliminado correctamente.');
           setPanelMessage({ type: 'success', text: 'Panel eliminado correctamente.' });
           if (detailModal?.type === 'panel' && detailModal.data._id === panel._id) {
             setDetailModal(null);
@@ -684,10 +685,9 @@ export default function DevicesView({
           await onRefresh?.();
         } catch (error) {
           console.error(error);
-          setPanelMessage({
-            type: 'error',
-            text: error instanceof Error ? error.message : 'No se pudo eliminar el panel.',
-          });
+          const text = error instanceof Error ? error.message : 'No se pudo eliminar el panel.';
+          toast.error(text);
+          setPanelMessage({ type: 'error', text });
         }
       },
     });
@@ -706,6 +706,7 @@ export default function DevicesView({
       onConfirm: async () => {
         try {
           await executeMutation(DELETE_BATTERY_MUTATION, { id: battery._id });
+          toast.success('Batería eliminada correctamente.');
           setBatteryMessage({ type: 'success', text: 'Batería eliminada correctamente.' });
           if (detailModal?.type === 'battery' && detailModal.data._id === battery._id) {
             setDetailModal(null);
@@ -713,10 +714,9 @@ export default function DevicesView({
           await onRefresh?.();
         } catch (error) {
           console.error(error);
-          setBatteryMessage({
-            type: 'error',
-            text: error instanceof Error ? error.message : 'No se pudo eliminar la batería.',
-          });
+          const text = error instanceof Error ? error.message : 'No se pudo eliminar la batería.';
+          toast.error(text);
+          setBatteryMessage({ type: 'error', text });
         }
       },
     });
@@ -735,6 +735,7 @@ export default function DevicesView({
       onConfirm: async () => {
         try {
           await executeMutation(DELETE_INVERTER_MUTATION, { id: inverter._id });
+          toast.success('Inversor eliminado correctamente.');
           setInverterMessage({ type: 'success', text: 'Inversor eliminado correctamente.' });
           if (detailModal?.type === 'inverter' && detailModal.data._id === inverter._id) {
             setDetailModal(null);
@@ -742,10 +743,9 @@ export default function DevicesView({
           await onRefresh?.();
         } catch (error) {
           console.error(error);
-          setInverterMessage({
-            type: 'error',
-            text: error instanceof Error ? error.message : 'No se pudo eliminar el inversor.',
-          });
+          const text = error instanceof Error ? error.message : 'No se pudo eliminar el inversor.';
+          toast.error(text);
+          setInverterMessage({ type: 'error', text });
         }
       },
     });

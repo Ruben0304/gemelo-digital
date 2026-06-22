@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { BatteryCharging, Info, Layers, Power, Settings2, MapPin, FileDown, Sun, Trash2 } from 'lucide-react';
 import { canAccessModule, moduleKeyFromPath } from '@/lib/permissions';
 import { executeMutation } from '@/lib/graphql-client';
+import { useToast } from '@/app/components/ToastProvider';
 
 const RESET_MUTATION = `
   mutation ResetSystemData {
@@ -69,6 +70,7 @@ export default function AjustesHomePage() {
   const [loaded, setLoaded] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const toast = useToast();
   const router = useRouter();
 
   useEffect(() => {
@@ -87,9 +89,11 @@ export default function AjustesHomePage() {
     try {
       await executeMutation(RESET_MUTATION, {});
       window.localStorage.removeItem('gd_onboarding_done');
+      toast.success('Sistema restablecido. Redirigiendo a la configuración inicial…');
       router.push('/');
     } catch (err) {
       console.error('Error al restablecer el sistema:', err);
+      toast.error('No se pudo restablecer el sistema.');
       setResetting(false);
       setConfirmReset(false);
     }

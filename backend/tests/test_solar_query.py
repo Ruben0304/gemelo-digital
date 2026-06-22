@@ -194,7 +194,6 @@ class TestResetSystemData:
             "baterias",
             "inversores",
             "electrodomesticos",
-            "apagones",
             "ubicacion_config",
             "shadow_profile",
         ]
