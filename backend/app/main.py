@@ -12,13 +12,15 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
+from pydantic import BaseModel
+
 from app.schema import schema
 from app.config import settings
 from app.database import get_database, close_database
-from app.auth import get_context
+from app.auth import get_context, verify_token
 from app.services.panel_classifier_service import panel_classifier_service
 from app.services.ml_model_service import ml_model_service
-from app.services.ml_consumption_service import ml_consumption_service
+from app.services import test_runner_service
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
 
@@ -62,14 +64,6 @@ async def lifespan(app: FastAPI):
         print(f"⚠️  Warning: Could not load solar production prediction model: {e}")
         print("   Solar production prediction endpoint will not be available.")
         print("   Please run the training script: backend/notebooks/train_solar_havana.py")
-
-    # Load ML model for consumption prediction
-    # try:
-    #     ml_consumption_service.load_model()
-    # except Exception as e:
-    #     print(f"⚠️  Warning: Could not load consumption prediction model: {e}")
-    #     print("   Consumption prediction endpoint will not be available.")
-    #     print("   Please run the training notebook: backend/notebooks/06_prediccion_consumo.ipynb")
 
     # Start background task for historical data collection
     task = asyncio.create_task(_periodic_snapshot_saver())
@@ -199,6 +193,58 @@ async def classify_panel(file: UploadFile = File(...)):
             status_code=500,
             detail=f"Error processing image: {str(e)}"
         )
+
+
+def _require_admin_rest(request: Request) -> dict:
+    """
+    Guard de administrador para endpoints REST (equivalente a require_admin del
+    contexto GraphQL). Lee el JWT del header Authorization, lo valida, comprueba
+    que la sesión no esté revocada y exige rol 'admin'.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Autenticación requerida. Por favor inicia sesión.")
+    payload = verify_token(auth_header[7:])
+    if not payload:
+        raise HTTPException(status_code=401, detail="Token inválido o expirado.")
+    if payload.get("jti"):
+        from app.services.session_service import is_token_revoked
+        if is_token_revoked(payload["jti"]):
+            raise HTTPException(status_code=401, detail="Token inválido o expirado.")
+    if payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Acceso denegado. Se requieren privilegios de administrador.")
+    return payload
+
+
+class RunTestsRequest(BaseModel):
+    """Cuerpo para ejecutar pruebas: suite ('backend'|'frontend') + lista de ids."""
+    suite: str
+    ids: list[str]
+
+
+@app.get("/api/dev/tests")
+async def list_dev_tests(request: Request):
+    """
+    Catálogo de pruebas (solo administradores) agrupado por categoría, para la
+    pantalla /dev/test. Incluye backend (pytest) y frontend (vitest).
+    """
+    _require_admin_rest(request)
+    return test_runner_service.build_catalog()
+
+
+@app.post("/api/dev/tests/run")
+async def run_dev_tests(payload: RunTestsRequest, request: Request):
+    """
+    Ejecuta un grupo de pruebas o una prueba puntual (solo administradores).
+    El cuerpo indica la suite y los ids (node ids de pytest, o '<archivo>::<nombre>'
+    para vitest).
+    """
+    _require_admin_rest(request)
+    if payload.suite == "backend":
+        return test_runner_service.run_backend(payload.ids)
+    if payload.suite == "frontend":
+        return test_runner_service.run_frontend(payload.ids)
+    raise HTTPException(status_code=400, detail="Suite desconocida. Use 'backend' o 'frontend'.")
 
 
 if __name__ == "__main__":

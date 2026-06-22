@@ -7,13 +7,11 @@ Cubre:
 - _calculate_prediction_confidence: confianza de predicción
 - _estimate_hourly_temperature: temperatura estimada por hora
 - _predict_consumption: consumo estimado por hora
-- apply_blackout_adjustments: ajuste de predicciones durante apagones
 """
 import math
 import pytest
 from app.services.prediction_service import (
     predict_production,
-    apply_blackout_adjustments,
     _get_hour_efficiency_factor,
     _calculate_prediction_confidence,
     _estimate_hourly_temperature,
@@ -180,98 +178,3 @@ class TestPredictConsumption:
     def test_consumo_positivo_siempre(self):
         for hour in range(24):
             assert _predict_consumption(hour) > 0
-
-
-# ─────────────────────────────────────────────────────────────────
-# apply_blackout_adjustments
-# ─────────────────────────────────────────────────────────────────
-
-# Apagón de referencia: 2024-06-15 10:00 → 13:00 UTC (180 min)
-BLACKOUT = {
-    "date": "2024-06-15",
-    "intervals": [{
-        "start": "2024-06-15T10:00:00+00:00",
-        "end":   "2024-06-15T13:00:00+00:00",
-        "durationMinutes": 180,
-    }],
-    "notes": "",
-}
-
-def make_prediction(timestamp: str, production: float = 20.0, consumption: float = 30.0, confidence: int = 85) -> dict:
-    return {
-        "timestamp": timestamp,
-        "hour": int(timestamp[11:13]),
-        "expectedProduction": production,
-        "expectedConsumption": consumption,
-        "confidence": confidence,
-    }
-
-
-class TestApplyBlackoutAdjustments:
-
-    def test_sin_apagones_devuelve_predicciones_sin_cambio(self):
-        predictions = [make_prediction("2024-06-15T11:00:00+00:00")]
-        result = apply_blackout_adjustments(predictions, [])
-        assert result == predictions
-
-    def test_reduccion_de_produccion_al_85_por_ciento(self):
-        p = make_prediction("2024-06-15T11:00:00+00:00", production=20.0)
-        result = apply_blackout_adjustments([p], [BLACKOUT])
-        assert result[0]["expectedProduction"] == pytest.approx(17.0, rel=0.01)
-
-    def test_reduccion_de_consumo_al_60_por_ciento(self):
-        p = make_prediction("2024-06-15T11:00:00+00:00", consumption=30.0)
-        result = apply_blackout_adjustments([p], [BLACKOUT])
-        assert result[0]["expectedConsumption"] == pytest.approx(18.0, rel=0.01)
-
-    def test_penalizacion_de_confianza_en_12_puntos(self):
-        p = make_prediction("2024-06-15T11:00:00+00:00", confidence=85)
-        result = apply_blackout_adjustments([p], [BLACKOUT])
-        assert result[0]["confidence"] == 73  # 85 - 12
-
-    def test_prediccion_fuera_del_apagon_no_se_modifica(self):
-        p = make_prediction("2024-06-15T08:00:00+00:00", production=25.0)
-        result = apply_blackout_adjustments([p], [BLACKOUT])
-        assert result[0]["expectedProduction"] == 25.0
-        assert "blackoutImpact" not in result[0]
-
-    def test_confianza_no_baja_de_40(self):
-        p = make_prediction("2024-06-15T11:00:00+00:00", confidence=50)
-        result = apply_blackout_adjustments([p], [BLACKOUT])
-        assert result[0]["confidence"] == 40  # 50 - 12 = 38 → clampado a 40
-
-    def test_blackout_impact_presente_en_predicciones_afectadas(self):
-        p = make_prediction("2024-06-15T11:00:00+00:00")
-        result = apply_blackout_adjustments([p], [BLACKOUT])
-        assert "blackoutImpact" in result[0]
-        impact = result[0]["blackoutImpact"]
-        assert impact["loadFactor"] == 0.6
-        assert impact["productionFactor"] == 0.85
-
-    def test_apagon_severo_cuando_duracion_mayor_180_min(self):
-        blackout_severo = {
-            "date": "2024-06-15",
-            "intervals": [{
-                "start": "2024-06-15T10:00:00+00:00",
-                "end":   "2024-06-15T14:00:00+00:00",
-                "durationMinutes": 240,
-            }],
-            "notes": "",
-        }
-        p = make_prediction("2024-06-15T11:00:00+00:00")
-        result = apply_blackout_adjustments([p], [blackout_severo])
-        assert result[0]["blackoutImpact"]["intensity"] == "severo"
-
-    def test_apagon_moderado_cuando_duracion_menor_180_min(self):
-        blackout_mod = {
-            "date": "2024-06-15",
-            "intervals": [{
-                "start": "2024-06-15T10:00:00+00:00",
-                "end":   "2024-06-15T12:00:00+00:00",
-                "durationMinutes": 120,
-            }],
-            "notes": "",
-        }
-        p = make_prediction("2024-06-15T11:00:00+00:00")
-        result = apply_blackout_adjustments([p], [blackout_mod])
-        assert result[0]["blackoutImpact"]["intensity"] == "moderado"

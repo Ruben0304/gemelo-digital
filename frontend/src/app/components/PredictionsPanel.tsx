@@ -7,7 +7,6 @@ import {
   WeatherData,
   BatteryStatus,
   SystemConfig,
-  ConsumptionPrediction,
 } from '@/types';
 import { Info, BrainCircuit, LineChart, ChevronDown, ChevronUp, AlertTriangle, AlertOctagon, Lightbulb } from 'lucide-react';
 
@@ -18,7 +17,6 @@ interface PredictionsPanelProps {
   weather?: WeatherData | null;
   batteryProjection?: BatteryStatus;
   config?: SystemConfig;
-  consumptionPredictions?: ConsumptionPrediction[];
   solarModelR2?: number | null;
 }
 
@@ -104,7 +102,6 @@ export default function PredictionsPanel({
   predictions,
   alerts = [],
   recommendations = [],
-  consumptionPredictions = [],
   solarModelR2,
 }: PredictionsPanelProps) {
   const [methodOpen, setMethodOpen] = useState(false);
@@ -113,14 +110,6 @@ export default function PredictionsPanel({
   const avgSolarConf =
     predictions.length > 0
       ? Math.round(predictions.reduce((s, p) => s + p.confidence, 0) / predictions.length)
-      : null;
-
-  const avgConsConf =
-    consumptionPredictions.length > 0
-      ? Math.round(
-          consumptionPredictions.reduce((s, p) => s + p.confidencePct, 0) /
-            consumptionPredictions.length,
-        )
       : null;
 
   return (
@@ -159,39 +148,6 @@ export default function PredictionsPanel({
             </div>
           )}
 
-          {avgSolarConf !== null && avgConsConf !== null && (
-            <div className="w-px h-10 bg-gray-100 shrink-0" />
-          )}
-
-          {/* Consumption confidence */}
-          {avgConsConf !== null && (
-            <div className="flex items-center gap-2.5">
-              <div className="p-1.5 bg-blue-50 rounded-lg shrink-0">
-                <LineChart className="w-4 h-4 text-blue-500" />
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Predicción consumo (perfil)</p>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <ConfidencePill
-                    pct={avgConsConf}
-                    tooltip={
-                      <>
-                        <span className="font-semibold block mb-1">Perfil configurado por el usuario</span>
-                        Cuando no hay suficiente histórico, el sistema usa el perfil horario de consumo que usted configuró.{'\n\n'}
-                        Base: 70% — estimación manual con variabilidad real ±15-25%.{'\n'}
-                        −8 pp horas nocturnas (0-5 h): uso irregular.{'\n'}
-                        −5 pp horas de transición (7-9, 17-20 h): llegada/salida.{'\n'}
-                        −5 pp fines de semana: rutinas menos predecibles.{'\n\n'}
-                        Rango efectivo: 50%–88%.
-                      </>
-                    }
-                  />
-                  <span className="text-xs text-gray-400">confianza media</span>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Expand methodology */}
           <button
             onClick={() => setMethodOpen((v) => !v)}
@@ -219,18 +175,9 @@ export default function PredictionsPanel({
             </div>
             <div className="space-y-1.5">
               <p className="font-semibold text-gray-800 flex items-center gap-1.5">
-                <LineChart className="w-3.5 h-3.5 text-blue-500" /> Consumo — perfil configurado por el usuario
+                <LineChart className="w-3.5 h-3.5 text-blue-500" /> Consumo — electrodomésticos configurados
               </p>
-              <p>No requiere datos históricos. El usuario define el consumo típico por hora.</p>
-              <p>Confianza base: <span className="font-semibold">70%</span> (estimación manual ±15-25%).</p>
-              <p>Penalizaciones: −8 pp nocturno · −5 pp transición · −5 pp fin de semana.</p>
-              <p>Rango efectivo: <span className="font-mono font-semibold">50%–88%</span>.</p>
-              <p className="text-gray-400">
-                Configurable en{' '}
-                <a href="/ajustes/consumo" className="underline hover:text-blue-600">
-                  Ajustes → Perfil de consumo
-                </a>.
-              </p>
+              <p>Basado en los electrodomésticos y sus perfiles horarios configurados en Ajustes.</p>
             </div>
           </div>
         )}

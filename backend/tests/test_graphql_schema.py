@@ -495,61 +495,6 @@ class TestGraphQLUbicacion:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Apagones — query y mutation
-# ─────────────────────────────────────────────────────────────────────────────
-
-CREATE_BLACKOUT = """
-mutation($input: BlackoutInput!) {
-  createBlackout(input: $input) {
-    _id
-    date
-    province
-  }
-}
-"""
-
-LIST_BLACKOUTS = "query { blackouts { _id date province } }"
-
-_BLACKOUT = {
-    "date": "2024-06-15",
-    "intervals": [
-        {"start": "2024-06-15T10:00:00", "end": "2024-06-15T12:00:00"}
-    ],
-    "province": "La Habana",
-}
-
-
-class TestGraphQLApagones:
-
-    def test_listar_apagones_vacio(self, anon):
-        r = anon.execute(LIST_BLACKOUTS)
-        assert r["data"]["blackouts"] == []
-
-    def test_admin_puede_crear_apagon(self, admin):
-        r = admin.execute(CREATE_BLACKOUT, {"input": _BLACKOUT})
-        assert not _has_errors(r)
-        assert r["data"]["createBlackout"]["province"] == "La Habana"
-
-    def test_crear_y_listar_apagon(self, admin):
-        admin.execute(CREATE_BLACKOUT, {"input": _BLACKOUT})
-        r = admin.execute(LIST_BLACKOUTS)
-        assert len(r["data"]["blackouts"]) == 1
-        assert r["data"]["blackouts"][0]["province"] == "La Habana"
-
-    def test_anonimo_no_puede_crear_apagon(self, anon):
-        r = anon.execute(CREATE_BLACKOUT, {"input": _BLACKOUT})
-        assert _rejected(r, "createBlackout")
-
-    def test_user_no_puede_crear_apagon(self, user):
-        r = user.execute(CREATE_BLACKOUT, {"input": _BLACKOUT})
-        assert _rejected(r, "createBlackout")
-
-    def test_listar_apagones_es_publico(self, anon):
-        r = anon.execute(LIST_BLACKOUTS)
-        assert not _has_errors(r)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Códigos de invitación
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1155,165 +1100,6 @@ class TestGraphQLShadowProfile:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Perfil de consumo — saveConsumptionProfile + consumptionProfile + predicciones
-# ─────────────────────────────────────────────────────────────────────────────
-
-SAVE_CONSUMPTION_PROFILE = """
-mutation($weekday: [Float!]!, $weekend: [Float!]!, $name: String) {
-  saveConsumptionProfile(weekday: $weekday, weekend: $weekend, name: $name) {
-    _id
-    name
-    isActive
-    weekday
-    weekend
-  }
-}
-"""
-
-QUERY_CONSUMPTION_PROFILE = """
-query {
-  consumptionProfile {
-    name
-    isActive
-    weekday
-    weekend
-  }
-}
-"""
-
-PREDICT_CONSUMPTION_PROFILE = """
-query($date: String!, $hours: [Int!]) {
-  predictConsumptionProfile(date: $date, hours: $hours) {
-    hour
-    consumptionKw
-    confidence
-    isWeekend
-  }
-}
-"""
-
-PREDICT_CONSUMPTION_RANGE = """
-query($startDate: String!, $endDate: String!) {
-  predictConsumptionProfileRange(startDate: $startDate, endDate: $endDate) {
-    hour
-    consumptionKw
-    isWeekend
-  }
-}
-"""
-
-PREDICT_CONSUMPTION_NEXT_HOURS = """
-query($hours: Int) {
-  predictConsumptionProfileNextHours(hours: $hours) {
-    hour
-    consumptionKw
-    confidence
-  }
-}
-"""
-
-_FLAT_WEEKDAY = [5.0] * 24
-_FLAT_WEEKEND = [4.0] * 24
-
-
-class TestGraphQLPerfilConsumo:
-
-    def test_query_perfil_sin_datos_retorna_default(self, admin):
-        r = admin.execute(QUERY_CONSUMPTION_PROFILE)
-        assert not _has_errors(r)
-        profile = r["data"]["consumptionProfile"]
-        assert profile is not None
-        assert len(profile["weekday"]) == 24
-
-    def test_admin_puede_guardar_perfil(self, admin):
-        r = admin.execute(SAVE_CONSUMPTION_PROFILE, {
-            "weekday": _FLAT_WEEKDAY, "weekend": _FLAT_WEEKEND, "name": "Perfil CUJAE"
-        })
-        assert not _has_errors(r)
-        assert r["data"]["saveConsumptionProfile"]["name"] == "Perfil CUJAE"
-
-    def test_user_no_puede_guardar_perfil(self, user):
-        r = user.execute(SAVE_CONSUMPTION_PROFILE, {
-            "weekday": _FLAT_WEEKDAY, "weekend": _FLAT_WEEKEND
-        })
-        assert _has_errors(r) or _data_is_null(r, "saveConsumptionProfile")
-
-    def test_guardar_y_recuperar_perfil(self, admin):
-        admin.execute(SAVE_CONSUMPTION_PROFILE, {
-            "weekday": _FLAT_WEEKDAY, "weekend": _FLAT_WEEKEND, "name": "CUJAE"
-        })
-        r = admin.execute(QUERY_CONSUMPTION_PROFILE)
-        assert r["data"]["consumptionProfile"]["name"] == "CUJAE"
-
-    def test_perfil_guardado_esta_activo(self, admin):
-        admin.execute(SAVE_CONSUMPTION_PROFILE, {
-            "weekday": _FLAT_WEEKDAY, "weekend": _FLAT_WEEKEND
-        })
-        r = admin.execute(QUERY_CONSUMPTION_PROFILE)
-        assert r["data"]["consumptionProfile"]["isActive"] is True
-
-    def test_perfil_weekday_tiene_24_valores(self, admin):
-        admin.execute(SAVE_CONSUMPTION_PROFILE, {
-            "weekday": _FLAT_WEEKDAY, "weekend": _FLAT_WEEKEND
-        })
-        r = admin.execute(QUERY_CONSUMPTION_PROFILE)
-        assert len(r["data"]["consumptionProfile"]["weekday"]) == 24
-
-    def test_predict_para_fecha_devuelve_24(self, admin):
-        r = admin.execute(PREDICT_CONSUMPTION_PROFILE, {"date": "2024-06-17"})
-        assert not _has_errors(r)
-        assert len(r["data"]["predictConsumptionProfile"]) == 24
-
-    def test_predict_horas_especificas(self, admin):
-        r = admin.execute(PREDICT_CONSUMPTION_PROFILE, {
-            "date": "2024-06-17", "hours": [8, 12, 18]
-        })
-        assert len(r["data"]["predictConsumptionProfile"]) == 3
-
-    def test_predict_estructura_prediccion(self, admin):
-        r = admin.execute(PREDICT_CONSUMPTION_PROFILE, {
-            "date": "2024-06-17", "hours": [10]
-        })
-        pred = r["data"]["predictConsumptionProfile"][0]
-        for field in ["hour", "consumptionKw", "confidence", "isWeekend"]:
-            assert field in pred
-
-    def test_predict_lunes_no_es_finde(self, admin):
-        r = admin.execute(PREDICT_CONSUMPTION_PROFILE, {
-            "date": "2024-06-17", "hours": [10]
-        })
-        assert r["data"]["predictConsumptionProfile"][0]["isWeekend"] is False
-
-    def test_predict_sabado_es_finde(self, admin):
-        r = admin.execute(PREDICT_CONSUMPTION_PROFILE, {
-            "date": "2024-06-15", "hours": [10]
-        })
-        assert r["data"]["predictConsumptionProfile"][0]["isWeekend"] is True
-
-    def test_predict_range_un_dia_devuelve_24(self, admin):
-        r = admin.execute(PREDICT_CONSUMPTION_RANGE, {
-            "startDate": "2024-06-17", "endDate": "2024-06-17"
-        })
-        assert not _has_errors(r)
-        assert len(r["data"]["predictConsumptionProfileRange"]) == 24
-
-    def test_predict_range_dos_dias_devuelve_48(self, admin):
-        r = admin.execute(PREDICT_CONSUMPTION_RANGE, {
-            "startDate": "2024-06-17", "endDate": "2024-06-18"
-        })
-        assert len(r["data"]["predictConsumptionProfileRange"]) == 48
-
-    def test_predict_next_hours_devuelve_24_por_defecto(self, admin):
-        r = admin.execute(PREDICT_CONSUMPTION_NEXT_HOURS, {})
-        assert not _has_errors(r)
-        assert len(r["data"]["predictConsumptionProfileNextHours"]) == 24
-
-    def test_predict_next_hours_parametro_n(self, admin):
-        r = admin.execute(PREDICT_CONSUMPTION_NEXT_HOURS, {"hours": 6})
-        assert len(r["data"]["predictConsumptionProfileNextHours"]) == 6
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Medidas de electrodomésticos — upload, clear, appliancesConsumptionForecast
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1426,14 +1212,16 @@ class TestGraphQLMedidasElectrodomestico:
 # Historial — historicalReadings + dailySummaries + seedHistoricalData
 # ─────────────────────────────────────────────────────────────────────────────
 
+# El historial almacena solo producción (productionKw); los resúmenes solo
+# totales de producción. El seed inserta lecturas cada 5 min (24 × 12 por día).
+INTERVALS_PER_DAY = 24 * 12
+
 QUERY_HISTORICAL = """
 query($limit: Int) {
   historicalReadings(limit: $limit) {
     _id
     timestamp
-    production
-    consumption
-    batteryLevel
+    productionKw
   }
 }
 """
@@ -1442,9 +1230,8 @@ QUERY_DAILY_SUMMARIES = """
 query($days: Int) {
   dailySummaries(days: $days) {
     date
-    totalProduction
-    totalConsumption
-    avgBatteryLevel
+    totalProductionKwh
+    maxProductionKw
     readingCount
   }
 }
@@ -1467,7 +1254,7 @@ class TestGraphQLHistorial:
     def test_seed_inserta_datos(self, admin):
         r = admin.execute(SEED_HISTORICAL, {"days": 2})
         assert not _has_errors(r)
-        assert r["data"]["seedHistoricalData"] == 2 * 24
+        assert r["data"]["seedHistoricalData"] == 2 * INTERVALS_PER_DAY
 
     def test_historico_con_datos_retorna_lecturas(self, admin):
         admin.execute(SEED_HISTORICAL, {"days": 2})
@@ -1479,14 +1266,14 @@ class TestGraphQLHistorial:
         admin.execute(SEED_HISTORICAL, {"days": 1})
         r = admin.execute(QUERY_HISTORICAL, {"limit": 1})
         reading = r["data"]["historicalReadings"][0]
-        for field in ["_id", "timestamp", "production", "consumption", "batteryLevel"]:
+        for field in ["_id", "timestamp", "productionKw"]:
             assert field in reading
 
     def test_historico_produccion_no_negativa(self, admin):
         admin.execute(SEED_HISTORICAL, {"days": 2})
         r = admin.execute(QUERY_HISTORICAL, {"limit": 48})
         for reading in r["data"]["historicalReadings"]:
-            assert reading["production"] >= 0
+            assert reading["productionKw"] >= 0
 
     def test_resumenes_vacio_retorna_lista_vacia(self, admin):
         r = admin.execute(QUERY_DAILY_SUMMARIES, {"days": 7})
@@ -1503,7 +1290,7 @@ class TestGraphQLHistorial:
         admin.execute(SEED_HISTORICAL, {"days": 2})
         r = admin.execute(QUERY_DAILY_SUMMARIES, {"days": 5})
         summary = r["data"]["dailySummaries"][0]
-        for field in ["date", "totalProduction", "totalConsumption", "avgBatteryLevel", "readingCount"]:
+        for field in ["date", "totalProductionKwh", "maxProductionKw", "readingCount"]:
             assert field in summary
 
     def test_resumenes_dias_parametro(self, admin):

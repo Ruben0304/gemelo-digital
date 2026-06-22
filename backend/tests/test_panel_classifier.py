@@ -18,10 +18,17 @@ from unittest.mock import MagicMock
 # use TF (incluyendo panel_classifier_service).
 # ─────────────────────────────────────────────────────────────────────────────
 
-_tf_mock = MagicMock()
-sys.modules.setdefault("tensorflow", _tf_mock)
-sys.modules.setdefault("tensorflow.keras", _tf_mock.keras)
-sys.modules.setdefault("tensorflow.keras.models", _tf_mock.keras.models)
+# Si TensorFlow está instalado (entorno con el modelo real), se usa el real para
+# no contaminar `sys.modules` — así la prueba e2e con el modelo real
+# (test_panel_cleanliness_e2e.py) funciona en la misma corrida. Solo si TF no
+# está disponible se sustituye por un mock para poder importar el servicio.
+try:  # pragma: no cover - depende del entorno
+    import tensorflow  # noqa: F401
+except Exception:  # pragma: no cover
+    _tf_mock = MagicMock()
+    sys.modules["tensorflow"] = _tf_mock
+    sys.modules["tensorflow.keras"] = _tf_mock.keras
+    sys.modules["tensorflow.keras.models"] = _tf_mock.keras.models
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Importaciones normales (TF ya está mockeado en sys.modules)

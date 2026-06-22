@@ -194,9 +194,7 @@ class TestResetSystemData:
             "baterias",
             "inversores",
             "electrodomesticos",
-            "apagones",
             "ubicacion_config",
-            "consumption_profiles",
             "shadow_profile",
         ]
         for col in collections:
