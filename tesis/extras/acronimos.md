@@ -1,4 +1,4 @@
-# Lista de Acrónimos y Abreviaturas {.unnumbered .unlisted}
+# Lista de acrónimos y abreviaturas {.unnumbered .unlisted}
 
 \begin{description}[leftmargin=3.5cm, style=nextline, font=\bfseries]
   \item[API] Application Programming Interface (interfaz de programación de aplicaciones)

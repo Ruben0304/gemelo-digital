@@ -4,12 +4,12 @@ El sistema propuesto es un gemelo digital web que representa de forma virtual y 
 
 Para ello el sistema se organiza en cuatro módulos. El de adquisición y gestión de datos integra y almacena la telemetría de la microrred (generación, consumo, estado de carga y flujos de energía) junto con los datos meteorológicos de un servicio externo. El de analítica reúne los cuatro modelos de inteligencia artificial. El de simulación y servicios de dominio combina datos, pronósticos y configuración para producir las líneas de tiempo de producción y demanda, las estimaciones de autonomía y las alertas. Y el de interfaz web presenta todo ello en un tablero comprensible para operadores, docentes y estudiantes. Separar el sistema en módulos permite que cada uno evolucione por su cuenta y que se incorporen nuevas fuentes o modelos sin rehacer el conjunto [@said2026aidt].
 
-El módulo de analítica integra los cuatro modelos que resume la Tabla \ref{tbl:modelos-ia}, cuyo entrenamiento y evaluación se abordan en el Capítulo 3. La predicción de la generación fotovoltaica usa un Random Forest, denominado *Havana v1*, entrenado con datos históricos de La Habana; predice el factor de capacidad, un valor entre 0 y 1, para que el mismo modelo sirva a cualquier tamaño de instalación, e incorpora variables físicas calculadas con pvlib [@breiman2001randomforests; @pvlib2024docs]. La predicción del consumo se resuelve en el despliegue actual con perfiles horarios configurables, una estrategia de arranque en frío adecuada al volumen de datos disponible, y deja entrenado un Random Forest listo para activarse cuando se acumule histórico propio [@khan2026energyconsumption]. La estimación de autonomía no usa aprendizaje automático: simula hora a hora el balance energético y la física del almacenamiento para calcular cuánto tiempo puede operar la microrred de forma autónoma. Y la clasificación de limpieza emplea una red neuronal convolucional MobileNetV2 con aprendizaje por transferencia [@sandler2018mobilenetv2].
+El módulo de analítica integra los cuatro modelos que resume la Tabla \ref{tbl:modelos-ia}, cuyo entrenamiento y evaluación se abordan en el Capítulo 3. La predicción de la generación fotovoltaica usa un Random Forest, denominado *Havana v1*, entrenado con datos históricos de La Habana; predice el factor de capacidad, un valor entre 0 y 1, para que el mismo modelo sirva a cualquier tamaño de instalación, e incorpora variables físicas calculadas con pvlib [@breiman2001randomforests; @pvlib2024docs]. La predicción del consumo se resuelve en el despliegue actual con perfiles horarios configurables, una estrategia de arranque en frío adecuada al volumen de datos disponible, y deja preparada la integración de un modelo Random Forest de consumo, que se activará cuando se acumule histórico propio [@khan2026energyconsumption]. La estimación de autonomía no usa aprendizaje automático: simula hora a hora el balance energético y la física del almacenamiento para calcular cuánto tiempo puede operar la microrred de forma autónoma. Y la clasificación de limpieza emplea una red neuronal convolucional MobileNetV2 con aprendizaje por transferencia [@sandler2018mobilenetv2].
 
 | Modelo | Algoritmo | Variable objetivo | Entrada principal |
 |---|---|---|---|
 | Generación (*Havana v1*) | Random Forest | Factor de capacidad (0–1) | 14 características climáticas y físicas |
-| Consumo | Perfiles horarios (Random Forest disponible) | Demanda eléctrica (kW) | Perfiles por hora y tipo de día |
+| Consumo | Perfiles horarios (Random Forest previsto) | Demanda eléctrica (kW) | Perfiles por hora y tipo de día |
 | Autonomía | Simulación física | Tiempo hasta el SoC mínimo | Pronósticos de generación y consumo |
 | Limpieza | MobileNetV2 (CNN) | Limpio / sucio | Imagen de 224×224 px |
 
@@ -17,11 +17,11 @@ El módulo de analítica integra los cuatro modelos que resume la Tabla \ref{tbl
 
 El sistema trabaja con tres familias de datos: variables meteorológicas obtenidas de Open-Meteo (temperatura, humedad, viento, nubosidad e irradiancia), variables eléctricas almacenadas como series temporales (generación, consumo, estado de carga y flujos) y variables temporales de calendario (hora, día y mes, con sus codificaciones cíclicas), que capturan los ritmos de uso del campus [@trull2025folsom; @almarzooqi2024hybrid].
 
-Dos herramientas complementan la captura de datos. La primera permite cargar mediciones reales de consumo por equipo: el administrador sube los ficheros que exportan los analizadores de calidad de potencia, por ejemplo en el formato del Hioki PW3360 (con columnas de fecha, hora y potencia activa), y el sistema los procesa para construir un perfil de 168 posiciones —los siete días de la semana por las veinticuatro horas del día— con el consumo medio de ese equipo en cada franja, que afina la predicción de la demanda. La segunda es un simulador de sombras: a partir de la ubicación de la instalación y de la posición del sol a lo largo del día, calcula un perfil de sombreado por hora solar —la fracción del arreglo que queda en sombra, con la posibilidad de ajustar manualmente la reducción de producción—, medido una vez en un día despejado y reutilizado para corregir las estimaciones de generación.
+Dos herramientas complementan la captura de datos. La primera carga mediciones reales de consumo por equipo: el administrador sube los ficheros que exportan los analizadores de calidad de potencia, por ejemplo en el formato del Hioki PW3360 (columnas de fecha, hora y potencia activa), y el sistema los procesa para construir un perfil de 168 posiciones (los siete días de la semana por las veinticuatro horas) con el consumo medio del equipo en cada franja; ese perfil afina la predicción de la demanda. La segunda es un simulador de sombras: a partir de la ubicación y de la posición del sol a lo largo del día, calcula un perfil de sombreado por hora solar (la fracción del arreglo que queda en sombra, con opción de ajustar a mano la reducción de producción), que se mide una vez en un día despejado y se reutiliza para corregir las estimaciones de generación.
 
 ### Requisitos y casos de uso
 
-A partir de las necesidades anteriores se especifican los requisitos del sistema. Los **requisitos funcionales** (RF) se agrupan por área. Los casos de uso definidos más adelante cubren en conjunto la totalidad de estos requisitos, de modo que un mismo caso de uso puede satisfacer varios RF.
+A partir de las necesidades anteriores se especifican los requisitos del sistema. Los **requisitos funcionales** (RF) se agrupan por área. Los casos de uso definidos más adelante cubren en conjunto la totalidad de estos requisitos, y un mismo caso de uso puede satisfacer varios RF.
 
 **Gestión de datos y activos**
 
@@ -42,7 +42,7 @@ A partir de las necesidades anteriores se especifican los requisitos del sistema
 **Mantenimiento y estado de los paneles**
 
 - RF-08. El sistema debe permitir cargar imágenes de paneles fotovoltaicos y devolver una clasificación del estado de limpieza («limpio» / «sucio») acompañada de una medida de confianza.
-- RF-09. El sistema debe mantener un histórico de resultados de clasificación para analizar su impacto en el rendimiento energético.
+- RF-09. El sistema debe presentar al operador el resultado de la clasificación, con su nivel de confianza, como apoyo a las decisiones de mantenimiento de los paneles.
 
 **Visualización y experiencia de usuario**
 
@@ -67,8 +67,8 @@ Los **requisitos no funcionales** (RNF) se definen según el modelo de calidad I
 - RNF-08. *(Seguridad)* El sistema debe controlar el acceso a las operaciones sensibles en función del rol del usuario autenticado.
 - RNF-09. *(Mantenibilidad)* La organización en módulos debe permitir sustituir o actualizar los modelos de inteligencia artificial sin alterar de forma significativa la interfaz de usuario.
 - RNF-10. *(Mantenibilidad)* El sistema debe documentar sus servicios y modelos principales, incluyendo variables de entrada y salida, métricas de desempeño y supuestos de diseño.
-- RNF-11. *(Portabilidad)* El backend debe poder desplegarse en entornos de laboratorio y en servidores de la universidad con cambios mínimos de configuración.
-- RNF-12. *(Portabilidad)* El frontend web debe ser accesible desde navegadores modernos sin requerir complementos propietarios.
+- RNF-11. *(Portabilidad)* El *backend* debe poder desplegarse en entornos de laboratorio y en servidores de la universidad con cambios mínimos de configuración.
+- RNF-12. *(Portabilidad)* El *frontend* web debe ser accesible desde navegadores modernos sin requerir complementos propietarios.
 
 Estos requisitos se traducen en un conjunto de atributos de calidad que guían el diseño arquitectónico, sintetizados en la Tabla \ref{tbl:atributos-calidad}.
 
@@ -85,13 +85,13 @@ Estos requisitos se traducen en un conjunto de atributos de calidad que guían e
 
 : Atributos de calidad objetivo del sistema. {#tbl:atributos-calidad}
 
-El diseño está sujeto, además, a varias **restricciones**: emplear únicamente tecnologías libres y de código abierto; desplegarse en hardware de laboratorio de la CUJAE; mantener toda la configuración del emplazamiento en datos, de modo que el sistema sirva a otra microrred sin tocar el código; y operar como herramienta de monitoreo, predicción y apoyo a la decisión, sin integración con sensores físicos en tiempo real ni control en lazo cerrado, que quedan fuera del alcance.
+El diseño está sujeto, además, a varias **restricciones**: emplear únicamente tecnologías libres y de código abierto; desplegarse en hardware de laboratorio de la CUJAE; mantener toda la configuración del emplazamiento en datos, para que el sistema sirva a otra microrred sin tocar el código; y operar como herramienta de monitoreo, predicción y apoyo a la decisión, sin integración con sensores físicos en tiempo real ni control en lazo cerrado, que quedan fuera del alcance.
 
 El comportamiento observable se modela con casos de uso. El actor principal es el Operador, que supervisa la microrred y consulta el clima, la generación y sus predicciones, los históricos y el estado de los paneles. El Administrador hereda esas capacidades y añade la gestión de equipos, de usuarios y de la configuración del sistema. Dos actores externos completan el modelo: la API de clima (Open-Meteo), que provee los datos meteorológicos, y el directorio LDAP, contra el que puede validarse la autenticación [@openmeteo2024]. La Figura \ref{fig:cus} presenta el diagrama de casos de uso.
 
 ![Diagrama UML de casos de uso del sistema.](../recursos/figuras/fig6_diagrama_casos_uso.png){#fig:cus width=90%}
 
-Para no extender el capítulo no se describen los nueve casos de uso, sino solo los tres principales, los que materializan las capacidades distintivas del gemelo digital: la predicción de la generación, el diagnóstico del estado de los paneles y la simulación de la autonomía. Los demás siguen la misma plantilla.
+A continuación se describen los tres casos de uso principales, los que materializan las capacidades distintivas del gemelo digital: la predicción de la generación, el diagnóstico del estado de los paneles y la simulación de la autonomía. Los seis casos de uso restantes se especifican, con la misma plantilla, en el Anexo A.
 
 | Campo | Descripción |
 |:---|:---|
@@ -109,11 +109,11 @@ Para no extender el capítulo no se describen los nueve casos de uso, sino solo 
 |:---|:---|
 | **Caso de uso** | Revisar estado de paneles |
 | **Actores** | Operador |
-| **Descripción** | El operador sube una imagen de un arreglo fotovoltaico. El sistema ejecuta el modelo de clasificación para determinar si el panel está limpio o sucio, devuelve la etiqueta con su medida de confianza y registra el resultado para su posterior análisis. |
+| **Descripción** | El operador sube una imagen de un arreglo fotovoltaico. El sistema ejecuta el modelo de clasificación para determinar si el panel está limpio o sucio y devuelve la etiqueta con su medida de confianza como apoyo a las decisiones de mantenimiento. |
 | **Requisitos funcionales** | RF-08, RF-09 |
 | **Casos de uso asociados** | Iniciar sesión |
 | **Precondiciones** | El usuario está autenticado y el modelo de clasificación de imágenes está disponible. |
-| **Postcondiciones** | Se obtiene la clasificación del estado de limpieza del panel y se registra para el análisis histórico y las decisiones de mantenimiento. |
+| **Postcondiciones** | Se obtiene la clasificación del estado de limpieza del panel, con su medida de confianza, como apoyo a las decisiones de mantenimiento. |
 
 : Caso de uso CU-05 — Revisar estado de paneles. {#tbl:cu05}
 

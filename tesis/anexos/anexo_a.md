@@ -72,9 +72,9 @@ El Capítulo 2 detalla, mediante la plantilla de especificación, los tres casos
 
 ## Anexo B — Distribución de las pruebas unitarias automatizadas {.unnumbered}
 
-Las 776 pruebas unitarias mencionadas en el Capítulo 3 se distribuyen por dominio funcional como se indica a continuación. El backend (Python, pytest) reúne 678 pruebas y el frontend (TypeScript, Vitest) 98.
+Las 819 pruebas unitarias mencionadas en el Capítulo 3 se distribuyen por dominio funcional como se indica a continuación. El *backend* (Python, pytest) reúne 678 pruebas y el *frontend* (TypeScript, Vitest) 141.
 
-| Archivo (backend) | Pruebas | Funciones y servicios cubiertos |
+| Archivo (*backend*) | Pruebas | Funciones y servicios cubiertos |
 |:---|:--:|:---|
 | `test_graphql_schema.py` | 123 | Esquema y *resolvers* GraphQL (consultas y mutaciones) |
 | `test_weather_source_service.py` | 61 | Fuentes de clima y adaptador (patrón Adapter) |
@@ -100,16 +100,21 @@ Las 776 pruebas unitarias mencionadas en el Capítulo 3 se distribuyen por domin
 | `test_solar_query.py` | 7 | Consulta solar agregada |
 | **Total** | **678** | |
 
-: Distribución de las pruebas del backend.
+: Distribución de las pruebas del *backend*.
 
-| Archivo (frontend) | Pruebas | Funciones cubiertas |
+| Archivo (*frontend*) | Pruebas | Funciones cubiertas |
 |:---|:--:|:---|
 | `calculations.test.ts` | 40 | Métricas, flujo de energía, eficiencia, *Performance Ratio* [@iec61724], estrategia de batería |
 | `permissions.test.ts` | 23 | Permisos y control de acceso por rol |
 | `shadowCalc.test.ts` | 18 | Cálculo del perfil de sombreado |
 | `predictions.test.ts` | 17 | Predicciones horarias y alertas por severidad |
-| **Total** | **98** | |
+| `ConfirmDialog.test.tsx` | 13 | Componente de diálogo de confirmación de acciones |
+| `AuthGate.test.tsx` | 10 | Control de sesión y acceso en la interfaz |
+| `WeatherForecast.test.tsx` | 7 | Componente de pronóstico meteorológico |
+| `FloatingBottomNav.test.tsx` | 7 | Barra de navegación flotante |
+| `BatteryStatus.test.tsx` | 6 | Tarjeta de estado de la batería |
+| **Total** | **141** | |
 
-: Distribución de las pruebas del frontend.
+: Distribución de las pruebas del *frontend*.
 
 \newpage

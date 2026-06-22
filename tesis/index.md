@@ -1,12 +1,12 @@
 ---
 title: "Gemelo digital para una microrred fotovoltaica aislada"
-subtitle: "Trabajo de Diploma para optar por el título de Ingeniero Informático"
+subtitle: "Trabajo de diploma para optar por el título de Ingeniero Informático"
 author:
   - Rubén Hernández Acevedo
   - Fabián Fernández Gálvez
 tutors:
-  - "Dr.C. Nayma Cepero Pérez"
-  - "Ms.C. Ernesto Alberto Álvarez"
+  - "Dr. C. Nayma Cepero Pérez"
+  - "MSc. Ernesto Alberto Álvarez"
 institution: "Universidad Tecnológica de La Habana \"José Antonio Echeverría\" (CUJAE)"
 faculty: "Facultad de Ingeniería Informática"
 career: "Ingeniería Informática"

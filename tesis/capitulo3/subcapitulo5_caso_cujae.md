@@ -1,6 +1,6 @@
-## Operación del sistema sobre la microrred CUJAE
+## Operación del sistema en el escenario de la CUJAE
 
-Más allá de las pruebas, el sistema se ejecutó sobre la microrred de la CUJAE con datos reales para mostrar su funcionamiento. El tablero principal (Figura \ref{fig:dash-gen}) reúne, sobre un esquema de la microrred, la potencia generada, el estado de carga de las baterías y los flujos de energía del momento, junto con las condiciones meteorológicas y el pronóstico a varios días.
+Más allá de las pruebas, el sistema se ejecutó configurado para la microrred de la CUJAE, con datos meteorológicos en vivo de Open-Meteo y los parámetros del sitio, para mostrar su funcionamiento. Como el alcance excluye la integración con sensores físicos, la generación, el estado de carga y los flujos que presenta el sistema son la estimación de los modelos a partir del clima y de la ficha técnica de los equipos, no una telemetría medida en la instalación. El tablero principal (Figura \ref{fig:dash-gen}) reúne, sobre un esquema de la microrred, la potencia generada, el estado de carga de las baterías y los flujos de energía del momento, junto con las condiciones meteorológicas y el pronóstico a varios días.
 
 ![Tablero principal con el flujo energético, los indicadores de generación y el panel meteorológico.](../recursos/figuras/fig2_dashboard_generacion.png){#fig:dash-gen width=95%}
 
@@ -12,7 +12,7 @@ El gráfico de producción frente a consumo (Figura \ref{fig:graf-gc}) superpone
 
 A partir de estas predicciones, el gemelo emite alertas por severidad: críticas cuando el nivel de batería previsto baja del 20 %, de advertencia bajo el 40 % o ante un déficit superior al 50 % del consumo, e informativas para condiciones meteorológicas reseñables. Y estima la autonomía respondiendo, mediante una simulación horaria que reutiliza los dos modelos ya evaluados, cuánto tiempo podría operar la microrred de forma autónoma; el resultado alimenta las alertas y la planificación de mantenimientos [@wang2023isolatedmg; @tao2019dt].
 
-Esa estimación se materializa en un simulador interactivo de autonomía (Figura \ref{fig:sim-bateria}), que proyecta hora a hora la evolución del estado de carga a partir de la generación y el consumo previstos y la acota con bandas optimista y pesimista derivadas de los márgenes de error de ambos modelos. El operador puede ensayar escenarios —reducir el consumo, variar la condición de los paneles o ampliar el horizonte— y leer de inmediato la hora estimada de agotamiento, el cruce de los umbrales crítico y de advertencia, y el balance neto de las próximas horas.
+Esa estimación se materializa en un simulador interactivo de autonomía (Figura \ref{fig:sim-bateria}), que proyecta hora a hora la evolución del estado de carga a partir de la generación y el consumo previstos y la acota con bandas optimista y pesimista derivadas de los márgenes de error de ambos modelos. El operador puede ensayar escenarios (reducir el consumo, variar la condición de los paneles o ampliar el horizonte) y leer de inmediato la hora estimada de agotamiento, el cruce de los umbrales crítico y de advertencia, y el balance neto de las próximas horas.
 
 ![Simulador de autonomía de la batería: proyección horaria del estado de carga con bandas de incertidumbre.](../recursos/figuras/fig20_simulador_bateria.png){#fig:sim-bateria width=95%}
 
