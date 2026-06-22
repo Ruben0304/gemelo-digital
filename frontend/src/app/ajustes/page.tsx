@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { BatteryCharging, Info, Layers, Power, Settings2, BarChart2, MapPin, FileDown, Sun, Trash2 } from 'lucide-react';
+import { BatteryCharging, Info, Layers, Power, Settings2, MapPin, FileDown, Sun, Trash2 } from 'lucide-react';
 import { canAccessModule, moduleKeyFromPath } from '@/lib/permissions';
 import { executeMutation } from '@/lib/graphql-client';
 
@@ -37,12 +37,6 @@ const sections = [
     title: 'Electrodomésticos',
     subtitle: 'Cargas, tiempos y modos',
     icon: <Settings2 className="h-5 w-5 text-amber-600" />,
-  },
-  {
-    href: '/ajustes/consumo',
-    title: 'Perfil de consumo',
-    subtitle: 'Curva horaria de demanda para predicciones',
-    icon: <BarChart2 className="h-5 w-5 text-blue-500" />,
   },
   {
     href: '/ajustes/clima',

@@ -26,7 +26,6 @@ import {
   InverterConfig,
   ApplianceConfig,
   EnergyFlow,
-  ConsumptionPrediction,
 } from '@/types';
 import { ArrowPathIcon, ExclamationTriangleIcon, WifiIcon } from '@heroicons/react/24/outline';
 import { executeQuery } from '@/lib/graphql-client';
@@ -313,11 +312,6 @@ type MLPrediction = {
   };
 };
 
-type MLConsumptionPrediction = {
-  datetime: string;
-  consumptionKw: number;
-};
-
 type DashboardQueryResult = {
   solar: {
     current: SolarData;
@@ -352,10 +346,6 @@ type MLPredictionsQueryResult = {
   mlPredictForHours: MLPrediction[];
 };
 
-type MLConsumptionPredictionsQueryResult = {
-  mlPredictConsumptionDateRange: MLConsumptionPrediction[];
-};
-
 // Query for ML predictions for a specific day
 const ML_PREDICTIONS_QUERY = `
   query MLPredictions($date: String!, $hours: [Int!]!) {
@@ -369,30 +359,6 @@ const ML_PREDICTIONS_QUERY = `
         cloudCover
         shortwaveRadiation
       }
-    }
-  }
-`;
-
-const ML_CONSUMPTION_PREDICTIONS_QUERY = `
-  query MLPredictConsumption($startDate: String!, $endDate: String!) {
-    mlPredictConsumptionDateRange(startDate: $startDate, endDate: $endDate) {
-      datetime
-      consumptionKw
-    }
-  }
-`;
-
-const PROFILE_CONSUMPTION_QUERY = `
-  query ProfileConsumption($date: String!) {
-    predictConsumptionProfile(date: $date) {
-      datetime
-      consumptionKw
-      confidence
-      confidencePct
-      sourceLabel
-      explanation
-      hour
-      isWeekend
     }
   }
 `;
@@ -566,19 +532,8 @@ function buildHourKey(value: string | Date): string {
 // Transform ML predictions to SolarData format
 function transformMLPredictionsToSolarData(
   mlPredictions: MLPrediction[],
-  consumptionPredictions: MLConsumptionPrediction[],
   applianceForecast: { datetime: string; consumptionKw: number }[] = []
 ): SolarData[] {
-  const consumptionMap = consumptionPredictions.reduce<Map<string, number>>((map, entry) => {
-    if (!entry?.datetime) {
-      return map;
-    }
-    map.set(entry.datetime, entry.consumptionKw);
-    const normalized = normalizeTimestamp(entry.datetime);
-    map.set(normalized, entry.consumptionKw);
-    return map;
-  }, new Map());
-
   const applianceMap = applianceForecast.reduce<Map<string, number>>((map, entry) => {
     if (!entry?.datetime) return map;
     map.set(buildHourKey(entry.datetime), entry.consumptionKw);
@@ -588,22 +543,16 @@ function transformMLPredictionsToSolarData(
   return mlPredictions.map((mlPred) => {
     const timestamp = new Date(mlPred.datetime);
     const hour = Number.isNaN(timestamp.getTime()) ? 0 : timestamp.getHours();
-    const normalizedTimestamp = normalizeTimestamp(mlPred.datetime);
-    const applianceConsumption = applianceMap.get(buildHourKey(mlPred.datetime));
-    const consumption =
-      applianceConsumption ??
-      consumptionMap.get(mlPred.datetime) ??
-      consumptionMap.get(normalizedTimestamp) ??
-      predictConsumption(hour);
+    const consumption = applianceMap.get(buildHourKey(mlPred.datetime)) ?? predictConsumption(hour);
 
     return {
       timestamp: mlPred.datetime,
       production: mlPred.productionKw,
       consumption,
-      batteryLevel: 0, // Will be calculated by system
+      batteryLevel: 0,
       gridExport: 0,
       gridImport: 0,
-      efficiency: 85, // Default efficiency estimate
+      efficiency: 85,
       batteryDelta: 0,
     };
   });
@@ -634,7 +583,6 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
 
   const [mlPredictions, setMlPredictions] = useState<SolarData[]>([]);
   const [mlLoading, setMlLoading] = useState(false);
-  const [consumptionPredictions, setConsumptionPredictions] = useState<ConsumptionPrediction[]>([]);
   const [solarModelR2, setSolarModelR2] = useState<number | null>(null);
   const [batteryConfigs, setBatteryConfigs] = useState<BatteryConfig[]>([]);
   const [loading, setLoading] = useState(true);
@@ -728,10 +676,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     try {
       const targetDate = new Date();
       targetDate.setDate(targetDate.getDate() + dayOffset);
-      const dateStr = targetDate.toISOString().split('T')[0]; // YYYY-MM-DD
-      const nextDate = new Date(targetDate);
-      nextDate.setDate(nextDate.getDate() + 1);
-      const nextDateStr = nextDate.toISOString().split('T')[0];
+      const dateStr = targetDate.toISOString().split('T')[0];
 
       // Hours from 7am to 10pm (7, 8, 9, ..., 22)
       const hours = Array.from({ length: 16 }, (_, i) => i + 7);
@@ -740,17 +685,6 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
         ML_PREDICTIONS_QUERY,
         { date: dateStr, hours }
       );
-
-      let consumptionPredictions: MLConsumptionPrediction[] = [];
-      try {
-        const consumptionData = await executeQuery<MLConsumptionPredictionsQueryResult>(
-          ML_CONSUMPTION_PREDICTIONS_QUERY,
-          { startDate: dateStr, endDate: nextDateStr }
-        );
-        consumptionPredictions = consumptionData.mlPredictConsumptionDateRange ?? [];
-      } catch (consumptionError) {
-        console.warn('Error fetching ML consumption predictions:', consumptionError);
-      }
 
       let appliancePoints: { datetime: string; consumptionKw: number }[] = [];
       try {
@@ -772,24 +706,11 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
       if (productionData.mlPredictForHours && productionData.mlPredictForHours.length > 0) {
         const transformedPredictions = transformMLPredictionsToSolarData(
           productionData.mlPredictForHours,
-          consumptionPredictions,
           appliancePoints
         );
         setMlPredictions(transformedPredictions);
       } else {
         setMlPredictions([]);
-      }
-
-      // Fetch profile-based consumption predictions for the target day
-      try {
-        type ProfileQueryResult = { predictConsumptionProfile: ConsumptionPrediction[] };
-        const profileData = await executeQuery<ProfileQueryResult>(
-          PROFILE_CONSUMPTION_QUERY,
-          { date: dateStr }
-        );
-        setConsumptionPredictions(profileData.predictConsumptionProfile ?? []);
-      } catch (profileError) {
-        console.warn('Error fetching profile consumption predictions:', profileError);
       }
     } catch (error) {
       console.error('Error fetching ML predictions:', error);
@@ -1109,7 +1030,6 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                 weather={weatherData}
                 batteryProjection={predictionsData.battery}
                 config={solarData.config}
-                consumptionPredictions={consumptionPredictions}
                 solarModelR2={solarModelR2}
               />
             </div>

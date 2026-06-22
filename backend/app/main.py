@@ -18,7 +18,6 @@ from app.database import get_database, close_database
 from app.auth import get_context
 from app.services.panel_classifier_service import panel_classifier_service
 from app.services.ml_model_service import ml_model_service
-from app.services.ml_consumption_service import ml_consumption_service
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
 
@@ -62,14 +61,6 @@ async def lifespan(app: FastAPI):
         print(f"⚠️  Warning: Could not load solar production prediction model: {e}")
         print("   Solar production prediction endpoint will not be available.")
         print("   Please run the training script: backend/notebooks/train_solar_havana.py")
-
-    # Load ML model for consumption prediction
-    # try:
-    #     ml_consumption_service.load_model()
-    # except Exception as e:
-    #     print(f"⚠️  Warning: Could not load consumption prediction model: {e}")
-    #     print("   Consumption prediction endpoint will not be available.")
-    #     print("   Please run the training notebook: backend/notebooks/06_prediccion_consumo.ipynb")
 
     # Start background task for historical data collection
     task = asyncio.create_task(_periodic_snapshot_saver())

@@ -30,7 +30,7 @@ const LH = 7.5;
 const EDIT_BUTTONS = [
   { left: '26%', top: '39%', href: '/ajustes/paneles' },   // centro panel solar azul
   { left: '42%', top: '72%', href: '/ajustes/baterias' },  // centro batería blanca
-  { left: '82%', top: '64%', href: '/ajustes/consumo' },   // centro puerta
+  { left: '82%', top: '64%', href: '/ajustes/electrodomesticos' },   // centro puerta
 ];
 
 function EditIcon() {

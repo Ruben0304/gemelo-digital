@@ -9,12 +9,34 @@ from typing import Any, Dict, List, Optional
 
 from .ml_prediction_service import predict_for_specific_hours
 from .ml_model_service import ml_model_service
-# Consumo por perfil: funciona sin el modelo ML de consumo y ya está en kW
-# reales del sistema (sin el divisor /10 del resolver de consumo ML).
-from .consumption_profile_service import predict_for_date as predict_consumption_for_date
 from .system_config import get_system_config
 
 LOCAL_TZ = ZoneInfo("America/Havana")
+
+
+def _consumption_from_appliances(date_str: str, hours: List[int]) -> List[Dict[str, Any]]:
+    """Calcula consumo horario (kW) sumando los electrodomésticos marcados como siempre encendidos."""
+    from .appliance_service import list_appliances
+    from .appliance_measurement_service import forecast_kw
+    from datetime import datetime as _dt
+
+    items = list_appliances()
+    result = []
+    for hour in hours:
+        dt = _dt.fromisoformat(date_str).replace(hour=hour)
+        total = 0.0
+        for appliance in items:
+            if not appliance.get("alwaysOn", True):
+                continue
+            profile = appliance.get("hourlyProfileKw") or []
+            qty = max(1, int(appliance.get("quantity", 1)))
+            if profile:
+                total += forecast_kw(profile, dt) * qty
+            else:
+                watts = appliance.get("averagePowerW", 0) or 0
+                total += (watts / 1000.0) * qty
+        result.append({"datetime": f"{date_str}T{hour:02d}:00:00", "consumption_kw": round(total, 3)})
+    return result
 
 
 def simulate_battery_depletion(
@@ -137,9 +159,9 @@ async def calculate_battery_discharge_time(
             lon
         )
 
-        # Get consumption predictions (perfil configurado, no requiere modelo ML)
-        consumption_today = predict_consumption_for_date(date_str, hours_to_simulate)
-        consumption_tomorrow = predict_consumption_for_date(next_date_str, hours_next_day)
+        # Consumo basado en electrodomésticos configurados como siempre encendidos
+        consumption_today = _consumption_from_appliances(date_str, hours_to_simulate)
+        consumption_tomorrow = _consumption_from_appliances(next_date_str, hours_next_day)
     except Exception as e:
         raise RuntimeError(f"Failed to get predictions: {e}")
 

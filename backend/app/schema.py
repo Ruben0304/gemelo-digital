@@ -79,20 +79,6 @@ from app.services.ml_prediction_service import (
     predict_for_date_range,
 )
 from app.services.ml_model_service import ml_model_service
-from app.services.consumption_prediction_service import (
-    predict_consumption,
-    predict_consumption_next_hours,
-    predict_consumption_for_date_range,
-    predict_consumption_for_specific_hours,
-)
-from app.services.ml_consumption_service import ml_consumption_service
-from app.services.consumption_profile_service import (
-    get_active_profile,
-    save_profile,
-    predict_for_date,
-    predict_date_range,
-    predict_next_hours as predict_profile_next_hours,
-)
 from app.services.battery_discharge_service import calculate_battery_discharge_time
 from app.services.invitation_service import create_invitation_code, list_invitation_codes
 from app.database import get_database
@@ -559,56 +545,6 @@ class MLModelInfoType:
 
 
 @strawberry.type
-class MLConsumptionPredictionType:
-    datetime: str
-    consumption_kw: float
-
-
-@strawberry.type
-class MLConsumptionModelInfoType:
-    loaded: bool
-    model_name: Optional[str]
-    test_rmse: Optional[float]
-    test_r2: Optional[float]
-    test_mae: Optional[float]
-    features: List[str]
-    training_date: Optional[str]
-    campus_id_default: Optional[int]
-    meter_id_default: Optional[int]
-    message: Optional[str]
-    # Procedencia del modelo y escalado aplicado a la salida. Permite al frontend
-    # avisar al usuario que la predicción ML proviene de un edificio del CUJAE
-    # y que se reescala por configuración, en lugar de presentarla como un
-    # modelo entrenado para el sistema que está viendo.
-    training_dataset: Optional[str] = strawberry.field(name="trainingDataset")
-    scale_divisor: Optional[float] = strawberry.field(name="scaleDivisor")
-    is_demo: bool = strawberry.field(name="isDemo")
-
-
-@strawberry.type
-class ConsumptionProfileType:
-    id_: Optional[str] = strawberry.field(name="_id")
-    name: str
-    weekday: List[float]
-    weekend: List[float]
-    is_active: bool = strawberry.field(name="isActive")
-    created_at: Optional[str] = strawberry.field(name="createdAt")
-    updated_at: Optional[str] = strawberry.field(name="updatedAt")
-
-
-@strawberry.type
-class ConsumptionPredictionType:
-    datetime: str
-    consumption_kw: float = strawberry.field(name="consumptionKw")
-    confidence: float
-    confidence_pct: int = strawberry.field(name="confidencePct")
-    source_label: str = strawberry.field(name="sourceLabel")
-    explanation: str
-    hour: int
-    is_weekend: bool = strawberry.field(name="isWeekend")
-
-
-@strawberry.type
 class BatteryDischargeEstimateType:
     minutesToEmpty: Optional[int]
     startHour: int
@@ -663,19 +599,6 @@ class WeatherSourceTestResultType:
 # ============================================================================
 # Helpers
 # ============================================================================
-
-
-def _map_consumption_prediction(p: dict) -> ConsumptionPredictionType:
-    return ConsumptionPredictionType(
-        datetime=p["datetime"],
-        consumption_kw=p["consumption_kw"],
-        confidence=p["confidence"],
-        confidence_pct=p["confidence_pct"],
-        source_label=p["source_label"],
-        explanation=p["explanation"],
-        hour=p["hour"],
-        is_weekend=p["is_weekend"],
-    )
 
 
 def _map_solar_point(item: dict) -> SolarPoint:
@@ -877,44 +800,6 @@ def _to_ml_prediction_type(pred: Dict[str, Any]) -> "MLPredictionType":
         weather_source=pred.get("weather_source", "Open-Meteo"),
         weather_source_warning=pred.get("weather_source_warning"),
     )
-
-
-def _scale_consumption_predictions(
-    predictions: List[Dict[str, Any]],
-    divisor: Optional[float] = None,
-) -> List[Dict[str, Any]]:
-    """
-    El modelo ML de consumo se entrenó con el medidor 55 del campus CUJAE (un
-    edificio cuyo consumo nominal es ~10× el sistema base del gemelo). Para
-    que la salida sea representativa del sistema simulado, dividimos por un
-    factor de escala configurable (settings.ML_CONSUMPTION_SCALE_DIVISOR).
-    Cuando se reentrena el modelo con datos del propio sitio, este divisor
-    debe ponerse a 1.
-    """
-    if not predictions:
-        return predictions
-
-    if divisor is None:
-        from app.config import settings
-        divisor = settings.ML_CONSUMPTION_SCALE_DIVISOR
-
-    if not divisor or divisor == 0:
-        return predictions
-
-    scaled_predictions: List[Dict[str, Any]] = []
-    for pred in predictions:
-        value = pred.get("consumption_kw")
-        try:
-            scaled_value = round(float(value) / divisor, 2)
-        except (TypeError, ValueError):
-            scaled_value = value
-
-        scaled_predictions.append({
-            **pred,
-            "consumption_kw": scaled_value,
-        })
-
-    return scaled_predictions
 
 
 # ============================================================================
@@ -1246,159 +1131,6 @@ class Query:
         )
 
     @strawberry.field
-    async def ml_predict_consumption(
-        self,
-        datetimes: List[str],
-        campus_id: Optional[int] = None,
-        meter_id: Optional[int] = None,
-    ) -> List[MLConsumptionPredictionType]:
-        """
-        Predict energy consumption using ML model for specific datetimes.
-
-        Args:
-            datetimes: List of ISO datetime strings (e.g., ["2025-01-15T13:00:00", "2025-01-15T14:00:00"])
-            campus_id: Campus ID (optional, defaults to model's default)
-            meter_id: Meter ID (optional, defaults to model's default)
-
-        Returns:
-            List of consumption predictions in kW
-        """
-        predictions = await predict_consumption(datetimes, campus_id, meter_id)
-        predictions = _scale_consumption_predictions(predictions)
-
-        return [
-            MLConsumptionPredictionType(
-                datetime=pred["datetime"],
-                consumption_kw=pred["consumption_kw"],
-            )
-            for pred in predictions
-        ]
-
-    @strawberry.field
-    async def ml_predict_consumption_next_hours(
-        self,
-        hours: int = 24,
-        campus_id: Optional[int] = None,
-        meter_id: Optional[int] = None,
-    ) -> List[MLConsumptionPredictionType]:
-        """
-        Predict energy consumption for the next N hours.
-
-        Args:
-            hours: Number of hours to predict (default: 24)
-            campus_id: Campus ID (optional, defaults to model's default)
-            meter_id: Meter ID (optional, defaults to model's default)
-
-        Returns:
-            List of hourly consumption predictions
-        """
-        predictions = await predict_consumption_next_hours(hours, campus_id, meter_id)
-        predictions = _scale_consumption_predictions(predictions)
-
-        return [
-            MLConsumptionPredictionType(
-                datetime=pred["datetime"],
-                consumption_kw=pred["consumption_kw"],
-            )
-            for pred in predictions
-        ]
-
-    @strawberry.field
-    async def ml_predict_consumption_date_range(
-        self,
-        start_date: str,
-        end_date: str,
-        campus_id: Optional[int] = None,
-        meter_id: Optional[int] = None,
-    ) -> List[MLConsumptionPredictionType]:
-        """
-        Predict energy consumption for all hours in a date range.
-
-        Args:
-            start_date: Start date (ISO format: 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM:SS')
-            end_date: End date (ISO format: 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM:SS')
-            campus_id: Campus ID (optional, defaults to model's default)
-            meter_id: Meter ID (optional, defaults to model's default)
-
-        Returns:
-            List of hourly consumption predictions for the entire date range
-        """
-        predictions = await predict_consumption_for_date_range(start_date, end_date, campus_id, meter_id)
-        predictions = _scale_consumption_predictions(predictions)
-
-        return [
-            MLConsumptionPredictionType(
-                datetime=pred["datetime"],
-                consumption_kw=pred["consumption_kw"],
-            )
-            for pred in predictions
-        ]
-
-    @strawberry.field
-    async def ml_predict_consumption_for_hours(
-        self,
-        date: str,
-        hours: List[int],
-        campus_id: Optional[int] = None,
-        meter_id: Optional[int] = None,
-    ) -> List[MLConsumptionPredictionType]:
-        """
-        Predict energy consumption for specific hours of a given day.
-
-        Args:
-            date: Date in YYYY-MM-DD format
-            hours: List of hours (0-23) to predict for (e.g., [7, 8, 9, ..., 22] for 7am-10pm)
-            campus_id: Campus ID (optional, defaults to model's default)
-            meter_id: Meter ID (optional, defaults to model's default)
-
-        Returns:
-            List of consumption predictions for the specified hours
-        """
-        predictions = await predict_consumption_for_specific_hours(date, hours, campus_id, meter_id)
-        predictions = _scale_consumption_predictions(predictions)
-
-        return [
-            MLConsumptionPredictionType(
-                datetime=pred["datetime"],
-                consumption_kw=pred["consumption_kw"],
-            )
-            for pred in predictions
-        ]
-
-    @strawberry.field
-    def ml_consumption_model_info(self) -> MLConsumptionModelInfoType:
-        """
-        Get information about the loaded consumption ML model.
-
-        Returns:
-            Model metadata including accuracy metrics and status
-        """
-        info = ml_consumption_service.get_model_info()
-        from app.config import settings
-        scale = settings.ML_CONSUMPTION_SCALE_DIVISOR
-        meter = ml_consumption_service.get_default_meter_id()
-        campus = ml_consumption_service.get_default_campus_id()
-        is_demo = (
-            settings.ML_CONSUMPTION_METER_ID is None
-            and settings.ML_CONSUMPTION_CAMPUS_ID is None
-        )
-        return MLConsumptionModelInfoType(
-            loaded=info.get("loaded", False),
-            model_name=info.get("model_name"),
-            test_rmse=info.get("test_rmse"),
-            test_r2=info.get("test_r2"),
-            test_mae=info.get("test_mae"),
-            features=info.get("features", []),
-            training_date=info.get("training_date"),
-            campus_id_default=campus,
-            meter_id_default=meter,
-            message=info.get("message"),
-            training_dataset=f"CUJAE — campus {campus}, meter {meter}",
-            scale_divisor=scale,
-            is_demo=is_demo,
-        )
-
-    @strawberry.field
     async def battery_discharge_estimate(
         self,
         start_hour: int,
@@ -1450,57 +1182,6 @@ class Query:
             )
             for code in codes
         ]
-
-    @strawberry.field
-    def consumption_profile(self) -> ConsumptionProfileType:
-        """Return the currently active consumption profile (falls back to defaults)."""
-        p = get_active_profile()
-        return ConsumptionProfileType(
-            id_=p.get("_id"),
-            name=p["name"],
-            weekday=p["weekday"],
-            weekend=p["weekend"],
-            is_active=p["isActive"],
-            created_at=p.get("createdAt"),
-            updated_at=p.get("updatedAt"),
-        )
-
-    @strawberry.field
-    def predict_consumption_profile(
-        self,
-        date: str,
-        hours: Optional[List[int]] = None,
-    ) -> List[ConsumptionPredictionType]:
-        """
-        Predict hourly consumption from the configured profile for a given date.
-
-        Args:
-            date:  Date in YYYY-MM-DD format.
-            hours: Optional list of hours (0-23). If omitted all 24 hours are returned.
-        """
-        preds = predict_for_date(date, hours)
-        return [_map_consumption_prediction(p) for p in preds]
-
-    @strawberry.field
-    def predict_consumption_profile_range(
-        self,
-        start_date: str,
-        end_date: str,
-    ) -> List[ConsumptionPredictionType]:
-        """
-        Predict consumption from the profile for every hour in [start_date, end_date].
-        """
-        preds = predict_date_range(start_date, end_date)
-        return [_map_consumption_prediction(p) for p in preds]
-
-    @strawberry.field
-    def predict_consumption_profile_next_hours(
-        self,
-        hours: int = 24,
-    ) -> List[ConsumptionPredictionType]:
-        """Predict consumption from the profile for the next N hours."""
-        preds = predict_profile_next_hours(hours)
-        return [_map_consumption_prediction(p) for p in preds]
 
     @strawberry.field
     def users(self, info: strawberry.types.Info) -> List[UserType]:
@@ -1751,30 +1432,6 @@ class LocationConfigInput:
 
 @strawberry.type
 class Mutation:
-    @strawberry.mutation(name="saveConsumptionProfile")
-    def save_consumption_profile_mutation(
-        self,
-        info: strawberry.types.Info,
-        weekday: List[float],
-        weekend: List[float],
-        name: Optional[str] = "Perfil principal",
-    ) -> ConsumptionProfileType:
-        """
-        Persist a new consumption profile and activate it immediately.
-        weekday and weekend must each contain exactly 24 non-negative float values.
-        """
-        require_admin(info.context)
-        p = save_profile(weekday, weekend, name or "Perfil principal")
-        return ConsumptionProfileType(
-            id_=p.get("_id"),
-            name=p["name"],
-            weekday=p["weekday"],
-            weekend=p["weekend"],
-            is_active=p["isActive"],
-            created_at=p.get("createdAt"),
-            updated_at=p.get("updatedAt"),
-        )
-
     @strawberry.mutation(name="createPanel")
     def create_panel_mutation(self, info: strawberry.types.Info, input: PanelInput) -> PanelType:
         require_admin(info.context)
@@ -2113,7 +1770,6 @@ class Mutation:
         db["inversores"].delete_many({})
         db["electrodomesticos"].delete_many({})
         db["ubicacion_config"].delete_many({})
-        db["consumption_profiles"].delete_many({})
         db["shadow_profile"].delete_many({})
         return True
 

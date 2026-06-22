@@ -11,10 +11,27 @@ from typing import Any, Dict, List, Optional
 
 from .system_config import get_system_config
 from .weather_service import get_weather_with_fallback
-from .consumption_profile_service import get_active_profile, predict_from_profile
 from .inverter_service import list_inverters
 
 DEFAULT_PANEL_EFFICIENCY = 0.2
+
+
+def _consumption_from_appliances(dt: datetime) -> float:
+    """Suma el consumo (kW) de electrodomésticos siempre encendidos para una hora dada."""
+    from .appliance_service import list_appliances
+    from .appliance_measurement_service import forecast_kw
+    total = 0.0
+    for appliance in list_appliances():
+        if not appliance.get("alwaysOn", True):
+            continue
+        profile = appliance.get("hourlyProfileKw") or []
+        qty = max(1, int(appliance.get("quantity", 1)))
+        if profile:
+            total += forecast_kw(profile, dt) * qty
+        else:
+            watts = appliance.get("averagePowerW", 0) or 0
+            total += (watts / 1000.0) * qty
+    return round(total, 3)
 
 
 def _parse_iso(date_str: str) -> datetime:
@@ -153,10 +170,6 @@ def generate_hourly_predictions(weather_forecast: List[Dict[str, Any]], config: 
     now = datetime.now(ZoneInfo("America/Havana")).replace(tzinfo=None)
     context = _resolve_solar_context(config)
     fallback_forecast = weather_forecast[0] if weather_forecast else None
-    # Consumo desde el perfil horario configurado por el usuario (kW reales del
-    # sistema), no un valor fijo de un sistema de otro tamaño.
-    consumption_profile = get_active_profile()
-
     hours = max(1, min(int(hours), 24 * 7))
     for hour_offset in range(hours):
         timestamp = now + timedelta(hours=hour_offset)
@@ -169,7 +182,7 @@ def generate_hourly_predictions(weather_forecast: List[Dict[str, Any]], config: 
         solar_radiation = _estimate_hourly_solar_radiation(hour, forecast["solarRadiation"], forecast["cloudCover"])
         temperature = _estimate_hourly_temperature(hour, forecast["maxTemp"], forecast["minTemp"])
         production = predict_production(solar_radiation, temperature, forecast["cloudCover"], hour, context)
-        consumption = predict_from_profile(consumption_profile, timestamp)["consumption_kw"]
+        consumption = _consumption_from_appliances(timestamp)
         confidence = _calculate_prediction_confidence(hour_offset, forecast["cloudCover"])
 
         predictions.append(

@@ -259,24 +259,4 @@ export interface ApplianceReadingPoint {
   powerKw: number;
 }
 
-export interface ConsumptionProfile {
-  _id?: string | null;
-  name: string;
-  weekday: number[];   // 24 kW values, one per hour
-  weekend: number[];   // 24 kW values, one per hour
-  isActive: boolean;
-  createdAt?: string | null;
-  updatedAt?: string | null;
-}
-
-export interface ConsumptionPrediction {
-  datetime: string;
-  consumptionKw: number;
-  confidence: number;       // 0-1
-  confidencePct: number;    // 0-100
-  sourceLabel: string;      // e.g. "Perfil de usuario · día laboral · hora 09:00"
-  explanation: string;      // why confidence is not 100%
-  hour: number;
-  isWeekend: boolean;
-}
 
