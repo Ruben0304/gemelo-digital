@@ -63,14 +63,25 @@
  */
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft, Sun, Info, HelpCircle, Activity, BarChart3, Edit3, RotateCcw,
-  Save, CheckCircle, CloudOff,
+  Save, CheckCircle, CloudOff, Box,
 } from 'lucide-react';
-import { sunPosition } from '@/lib/sunPosition';
+import { sunPosition, sunDirection } from '@/lib/sunPosition';
 import { executeQuery, executeMutation } from '@/lib/graphql-client';
 import { SHADOW_PROFILE_QUERY, SAVE_SHADOW_PROFILE_MUTATION } from '@/lib/graphql-queries';
+
+// El preview 3D usa WebGL (react-three-fiber) → solo en cliente, sin SSR.
+const PanelPreview = dynamic(() => import('./PanelPreview'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">
+      Cargando vista 3D…
+    </div>
+  ),
+});
 
 const LAT = 23.1136;
 const LON = -82.3666;
@@ -134,6 +145,8 @@ export default function SimuladorSombrasPage() {
     HOURS.map(h => ({ hour: h, shadowPct: 0, prodOverride: null })),
   );
   const [editingHour, setEditingHour] = useState<number | null>(null);
+  // Hora "activa" para el preview 3D: la franja que el usuario está tocando.
+  const [activeHour, setActiveHour] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
   const [lastSaved, setLastSaved] = useState<string | null>(null);
@@ -230,6 +243,26 @@ export default function SimuladorSombrasPage() {
     };
   }, [daySlots, slots]);
 
+  // ── Preview 3D ────────────────────────────────────────────────────────────
+  // Hora que se visualiza: la que el usuario está ajustando o, por defecto, el
+  // mediodía solar (franja diurna de mayor elevación).
+  const solarNoonHour = useMemo(() => {
+    const day = sunElevations.filter(e => e.elev > 0);
+    if (!day.length) return HOURS[Math.floor(HOURS.length / 2)];
+    return day.reduce((best, e) => (e.elev > best.elev ? e : best)).hour;
+  }, [sunElevations]);
+
+  const previewHour =
+    activeHour !== null && isDayHour(activeHour) ? activeHour : solarNoonHour;
+
+  const previewElev = sunElevations.find(e => e.hour === previewHour)?.elev ?? 0;
+  const previewShadowPct = slots.find(s => s.hour === previewHour)?.shadowPct ?? 0;
+
+  const previewSunDir = useMemo(() => {
+    const d = new Date(currentDate.getFullYear(), month - 1, 15, previewHour, 30, 0, 0);
+    return sunDirection(sunPosition(d, LAT, LON));
+  }, [currentDate, month, previewHour]);
+
   return (
     <div className="min-h-screen bg-slate-50">
 
@@ -299,7 +332,7 @@ export default function SimuladorSombrasPage() {
       </header>
 
       {/* ── Main ────────────────────────────────────────────────────────────── */}
-      <main className="max-w-[1400px] mx-auto px-4 py-6">
+      <main className="max-w-[1700px] mx-auto px-4 py-6">
         <div className="flex gap-6 items-start">
 
           {/* ── LEFT: Editor ─────────────────────────────────────────────── */}
@@ -451,7 +484,12 @@ export default function SimuladorSombrasPage() {
                           min={0} max={100} step={5}
                           value={slot.shadowPct}
                           disabled={!isDay}
-                          onChange={e => updateSlot(slot.hour, { shadowPct: Number(e.target.value) })}
+                          onFocus={() => setActiveHour(slot.hour)}
+                          onPointerDown={() => setActiveHour(slot.hour)}
+                          onChange={e => {
+                            setActiveHour(slot.hour);
+                            updateSlot(slot.hour, { shadowPct: Number(e.target.value) });
+                          }}
                           className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer disabled:cursor-not-allowed"
                           style={{
                             accentColor: isDay ? color : '#e2e8f0',
@@ -545,8 +583,47 @@ export default function SimuladorSombrasPage() {
             </div>
           </div>
 
-          {/* ── RIGHT: Resumen ───────────────────────────────────────────── */}
-          <aside className="w-72 flex-shrink-0 space-y-4">
+          {/* ── RIGHT: Visor 3D fijo + resumen scrollable (estilo IDE) ───── */}
+          <aside className="w-[40%] min-w-[420px] max-w-[680px] flex-shrink-0 sticky top-16 h-[calc(100vh-5.5rem)] flex flex-col gap-4">
+
+            {/* Visor 3D del panel — FIJO en la parte superior, no se desplaza */}
+            <div className="flex-shrink-0 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 bg-gray-50/70">
+                <Box className="w-4 h-4 text-gray-400" />
+                <span className="text-sm font-semibold text-gray-800">Vista 3D del panel</span>
+                <span className="ml-2 text-[11px] text-gray-400">sombreado en tiempo real</span>
+                <span className="ml-auto text-xs font-mono font-bold text-gray-600 tabular-nums">
+                  {fmt(previewHour)}
+                </span>
+              </div>
+              <div className="relative w-full" style={{ height: '56vh', minHeight: 380 }}>
+                <PanelPreview
+                  sunDirection={previewSunDir}
+                  sunElevDeg={previewElev}
+                  shadowPct={previewShadowPct}
+                />
+                {/* Etiqueta de sombra actual sobre el canvas */}
+                <div className="absolute bottom-3 left-3 flex items-center gap-2 bg-black/60 backdrop-blur-sm text-white text-xs font-semibold px-3 py-1.5 rounded-xl shadow-lg">
+                  <span
+                    className="w-2.5 h-2.5 rounded-full"
+                    style={{ backgroundColor: shadowColor(previewShadowPct) }}
+                  />
+                  Sombra {previewShadowPct}%
+                  <span className="text-white/50">·</span>
+                  <span className="text-white/80">sol {previewElev.toFixed(0)}°</span>
+                </div>
+                {/* Pista de interacción */}
+                <div className="absolute top-3 right-3 text-[10px] text-gray-500 bg-white/70 backdrop-blur-sm px-2 py-1 rounded-lg">
+                  {activeHour !== null && isDayHour(activeHour)
+                    ? `Franja ${fmt(previewHour)}`
+                    : 'Mediodía solar'} · arrastra para orbitar
+                </div>
+              </div>
+            </div>
+
+            {/* Resumen — scroll independiente DENTRO del panel fijo (el canvas no
+                se mueve; estas tarjetas se desplazan en su propia zona) */}
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1 -mr-1">
 
             {/* Estadísticas */}
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
@@ -678,6 +755,7 @@ export default function SimuladorSombrasPage() {
             >
               <RotateCcw className="w-3.5 h-3.5" /> Reiniciar todo a 0%
             </button>
+            </div>
           </aside>
 
         </div>
