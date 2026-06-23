@@ -43,7 +43,7 @@ function EditIcon() {
 
 export default function SystemDiagram({ solarKw, batteryKwh, consumptionKw, isAdmin = false }: Props) {
   const router = useRouter();
-  const solarText = solarKw % 1 === 0 ? `${solarKw} kW`         : `${solarKw.toFixed(1)} kW`;
+  const solarText = `${solarKw.toFixed(1)} kW`;
   const battText  = batteryKwh % 1 === 0 ? `${batteryKwh} kWh`  : `${batteryKwh.toFixed(1)} kWh`;
   const loadText  = consumptionKw % 1 === 0 ? `${consumptionKw} kW` : `${consumptionKw.toFixed(1)} kW`;
 

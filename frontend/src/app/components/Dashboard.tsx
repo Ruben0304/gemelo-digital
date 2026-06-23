@@ -658,6 +658,26 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     return solarData?.current.production ?? 0;
   }, [mlPredictions, solarData]);
 
+  // Subtítulo del header con los valores reales del sistema (capacidad solar,
+  // batería y ubicación). Solo se muestra cada parte si existe en la config.
+  const headerSubtitle = useMemo(() => {
+    const config = predictionsData?.config ?? solarData?.config;
+    const parts: string[] = [];
+    const capacityKw = config?.solar?.capacityKw;
+    const capacityKwh = config?.battery?.capacityKwh;
+    const locationName = config?.location?.name;
+    if (capacityKw && capacityKw > 0) {
+      parts.push(`${+capacityKw.toFixed(1)} kW`);
+    }
+    if (capacityKwh && capacityKwh > 0) {
+      parts.push(`${+capacityKwh.toFixed(1)} kWh`);
+    }
+    if (locationName && locationName.trim()) {
+      parts.push(locationName.trim());
+    }
+    return parts.join(' · ');
+  }, [predictionsData, solarData]);
+
   // Consumo "ahora" desde la misma fuente que el gráfico (electrodomésticos/ML).
   // Si no hay electrodomésticos configurados el valor es 0, igual que el gráfico.
   const currentConsumption = useMemo(() => {
@@ -677,7 +697,10 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     try {
       const targetDate = new Date();
       targetDate.setDate(targetDate.getDate() + dayOffset);
-      const dateStr = targetDate.toISOString().split('T')[0];
+      // Usar la fecha LOCAL (no toISOString, que es UTC): de noche en husos
+      // negativos como Cuba (UTC-4), toISOString ya está en el día siguiente y
+      // el gráfico —que filtra por día local— descartaría todos los puntos.
+      const dateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
 
       // Hours from 7am to 10pm (7, 8, 9, ..., 22)
       const hours = Array.from({ length: 16 }, (_, i) => i + 7);
@@ -918,9 +941,11 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
               <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
                 Gemelo Digital · Microrred Solar
               </h1>
-              <p className="text-xs sm:text-sm text-gray-500">
-                50 kW · 100 kWh · La Habana, Cuba
-              </p>
+              {headerSubtitle && (
+                <p className="text-xs sm:text-sm text-gray-500">
+                  {headerSubtitle}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-3">
               {activeSection === 'overview' && (
