@@ -1,4 +1,4 @@
-## Conclusiones del capítulo
+## Conclusiones parciales {.unnumbered}
 
 Del análisis experimental se concluye que:
 

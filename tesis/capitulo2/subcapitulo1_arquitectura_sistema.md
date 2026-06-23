@@ -48,7 +48,7 @@ A partir de las necesidades anteriores se especifican los requisitos del sistema
 
 - RF-10. El sistema debe proporcionar un tablero web que muestre, en una sola vista, indicadores clave de rendimiento, series temporales de generación y consumo, estado de las baterías y condiciones meteorológicas.
 - RF-11. El sistema debe permitir seleccionar intervalos de tiempo para el análisis (día, semana, mes) y filtrar los datos por tipo de variable.
-- RF-12. El sistema debe ofrecer vistas específicas para la gestión del inventario de activos y la configuración del sistema (ubicación, fuentes de clima, perfil de consumo y sombreado).
+- RF-12. El sistema debe ofrecer vistas específicas para la gestión del inventario de activos y la configuración del sistema (ubicación, fuentes de clima y sombreado).
 
 **Seguridad y gestión de usuarios**
 

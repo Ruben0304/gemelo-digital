@@ -81,6 +81,7 @@ OUT="${OUT:-outputs/debug}"
 mkdir -p "$OUT"
 pandoc \
   index.md \
+  extras/opinion_tutor.md \
   extras/declaracion_autoria.md \
   extras/agradecimientos.md \
   extras/resumen_es.md \
@@ -210,6 +211,7 @@ Word no soporta `\include-before-body` LaTeX; la portada se omite y se entrega c
 mkdir -p "${OUT:-outputs/debug}"
 pandoc \
   index.md \
+  extras/opinion_tutor.md \
   extras/declaracion_autoria.md \
   extras/agradecimientos.md \
   extras/resumen_es.md \
@@ -255,6 +257,7 @@ pandoc \
 mkdir -p "${OUT:-outputs/debug}"
 pandoc \
   index.md \
+  extras/opinion_tutor.md \
   extras/declaracion_autoria.md \
   extras/agradecimientos.md \
   extras/resumen_es.md \
@@ -302,6 +305,7 @@ pandoc \
 mkdir -p "${OUT:-outputs/debug}"
 pandoc \
   index.md \
+  extras/opinion_tutor.md \
   extras/declaracion_autoria.md \
   extras/agradecimientos.md \
   extras/resumen_es.md \

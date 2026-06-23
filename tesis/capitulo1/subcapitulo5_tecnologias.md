@@ -43,7 +43,7 @@ La persistencia guarda dos cosas de naturaleza distinta: la configuración del s
 | Modelo de datos | Documental | Relacional | Series temp. | Híbrido |
 | Esquema flexible | Sí | Limitado | No | Limitado |
 | Idoneidad en series temporales | Media | Media | Alta | Alta |
-| Transaccionalidad | Básica | Estricta (ACID) | Limitada | Estricta |
+| Transac­cio­nalidad | Básica | Estricta (ACID) | Limitada | Estricta |
 | Complejidad operativa | Baja | Media | Media | Media |
 
 : Comparación de gestores de base de datos según criterios de evaluación. {#tbl:bd}

@@ -1,4 +1,4 @@
-## Conclusiones del capítulo
+## Conclusiones parciales {.unnumbered}
 
 Del análisis y el diseño de la solución se concluye que:
 

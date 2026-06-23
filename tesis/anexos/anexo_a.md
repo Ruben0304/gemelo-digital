@@ -63,7 +63,7 @@ El Capítulo 2 detalla, mediante la plantilla de especificación, los tres casos
 |:---|:---|
 | **Caso de uso** | Gestionar sistema energético instalado |
 | **Actores** | Administrador |
-| **Descripción** | El administrador configura los parámetros globales de la instalación: la ubicación geográfica, las fuentes de clima, el perfil de consumo y el perfil de sombreado. |
+| **Descripción** | El administrador configura los parámetros globales de la instalación: la ubicación geográfica, las fuentes de clima y el perfil de sombreado. |
 | **Requisitos funcionales** | RF-03, RF-12, RF-14 |
 | **Precondiciones** | El usuario está autenticado como administrador. |
 | **Postcondiciones** | La configuración queda actualizada, lo que permite adaptar el sistema a distintas microrredes sin modificar el código. |

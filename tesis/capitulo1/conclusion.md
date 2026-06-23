@@ -1,4 +1,4 @@
-## Conclusiones del capítulo
+## Conclusiones parciales {.unnumbered}
 
 Del estudio de los fundamentos y el estado del arte se concluye que:
 

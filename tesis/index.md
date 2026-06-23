@@ -56,6 +56,15 @@ header-includes: |
   \hyphenpenalty=10000
   \exhyphenpenalty=10000
   \emergencystretch=3em
+  \usepackage{etoolbox}
+  \raggedbottom
+  \setlength{\LTpre}{6pt}
+  \setlength{\LTpost}{10pt}
+  \setlength{\intextsep}{8pt plus 1pt minus 1pt}
+  \setlength{\textfloatsep}{8pt plus 1pt minus 1pt}
+  \setlength{\abovecaptionskip}{4pt}
+  \setlength{\belowcaptionskip}{2pt}
+  \AtBeginEnvironment{longtable}{\small\setlength{\tabcolsep}{4pt}\hyphenpenalty=150\exhyphenpenalty=150\renewcommand{\_}{\textunderscore\allowbreak}}
   \AtBeginDocument{\renewcommand{\tablename}{Tabla}\renewcommand{\listtablename}{Índice de tablas}}
   \let\maketitle\relax
   \pagestyle{plain}
@@ -67,6 +76,9 @@ header-includes: |
   \renewcommand{\@makeschapterhead}[1]{%
     \vspace*{-58pt}{\parindent\z@\raggedright\normalfont
       \interlinepenalty\@M\Huge\bfseries #1\par\nobreak\vskip 26\p@}}
+  \renewcommand\section{\@startsection{section}{1}{\z@}{-2.4ex}{1.0ex}{\normalfont\Large\bfseries\raggedright}}
+  \renewcommand\subsection{\@startsection{subsection}{2}{\z@}{-2.0ex}{0.8ex}{\normalfont\large\bfseries\raggedright}}
+  \renewcommand\subsubsection{\@startsection{subsubsection}{3}{\z@}{-1.8ex}{0.6ex}{\normalfont\normalsize\bfseries\raggedright}}
   \makeatother
 ---
 
