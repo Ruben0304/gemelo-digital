@@ -19,7 +19,6 @@ services:
       MONGODB_DB: GemeloDigitalCujai
       CORS_ORIGINS: http://localhost:3000
       JWT_SECRET: ${JWT_SECRET:-gemelo-digital-cujae-secret-key-2024}
-      LDAP_ENABLED: "false"
     depends_on:
       - mongodb
 

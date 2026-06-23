@@ -10,10 +10,13 @@ import type { User } from '@/types'
 
 vi.mock('@/lib/graphql-client', () => ({
   executeMutation: vi.fn(),
+  // AuthGate consulta ldapEnabled al montar; por defecto la pestaña LDAP oculta.
+  executeQuery: vi.fn(() => Promise.resolve({ ldapEnabled: false })),
 }))
 
-import { executeMutation } from '@/lib/graphql-client'
+import { executeMutation, executeQuery } from '@/lib/graphql-client'
 const mockMutation = executeMutation as ReturnType<typeof vi.fn>
+const mockQuery = executeQuery as ReturnType<typeof vi.fn>
 
 const mockUser: User = {
   _id: 'user-1',
@@ -29,6 +32,8 @@ describe('AuthGate', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
+    // Por defecto LDAP deshabilitado; los tests que lo necesiten lo sobreescriben.
+    mockQuery.mockResolvedValue({ ldapEnabled: false })
   })
 
   it('renderiza en modo login por defecto', () => {
@@ -42,10 +47,20 @@ describe('AuthGate', () => {
     expect(screen.getByText('Crear cuenta')).toBeInTheDocument()
   })
 
-  it('cambia al modo LDAP al hacer clic en "LDAP"', () => {
+  it('cambia al modo LDAP al hacer clic en "LDAP"', async () => {
+    mockQuery.mockResolvedValue({ ldapEnabled: true })
     render(<AuthGate onAuthenticated={vi.fn()} />)
-    fireEvent.click(screen.getByRole('button', { name: /LDAP/i }))
+    // La pestaña LDAP aparece tras resolverse la consulta ldapEnabled.
+    const ldapTab = await screen.findByRole('button', { name: /LDAP/i })
+    fireEvent.click(ldapTab)
     expect(screen.getByText('Acceso LDAP institucional')).toBeInTheDocument()
+  })
+
+  it('oculta la pestaña LDAP cuando el directorio está deshabilitado', async () => {
+    mockQuery.mockResolvedValue({ ldapEnabled: false })
+    render(<AuthGate onAuthenticated={vi.fn()} />)
+    await waitFor(() => expect(mockQuery).toHaveBeenCalled())
+    expect(screen.queryByRole('button', { name: /^LDAP$/i })).not.toBeInTheDocument()
   })
 
   it('muestra campo de nombre solo en modo registro', () => {

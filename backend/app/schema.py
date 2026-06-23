@@ -56,6 +56,12 @@ from app.services.session_service import (
     revoke_session,
     revoke_sessions_by_email,
 )
+from app.services.ldap_config_service import (
+    get_ldap_config,
+    save_ldap_config,
+    is_ldap_enabled,
+    test_ldap_connection,
+)
 from app.services.weather_service import get_weather_with_fallback
 from app.services.weather_source_service import (
     delete_weather_source,
@@ -564,6 +570,29 @@ class InvitationCodeType:
 
 
 @strawberry.type
+class LdapConfigType:
+    enabled: bool
+    serverUrl: str
+    baseDn: str
+    bindDn: str
+    userSearchFilter: str
+    emailAttr: str
+    nameAttr: str
+    useTls: bool
+    connectTimeout: int
+    # La contraseña de bind nunca se devuelve; solo se indica si hay una guardada.
+    hasBindPassword: bool
+    updatedAt: Optional[str]
+
+
+@strawberry.type
+class LdapTestResultType:
+    success: bool
+    message: str
+    sampleUser: Optional[str]
+
+
+@strawberry.type
 class WeatherSourceType:
     id_: str = strawberry.field(name="_id")
     name: str
@@ -741,6 +770,22 @@ def _map_user(data: dict) -> UserType:
     if "_id" in data_copy:
         data_copy["id_"] = data_copy.pop("_id")
     return UserType(**data_copy)
+
+
+def _map_ldap_config(cfg: dict) -> "LdapConfigType":
+    return LdapConfigType(
+        enabled=bool(cfg.get("enabled")),
+        serverUrl=cfg.get("serverUrl") or "",
+        baseDn=cfg.get("baseDn") or "",
+        bindDn=cfg.get("bindDn") or "",
+        userSearchFilter=cfg.get("userSearchFilter") or "",
+        emailAttr=cfg.get("emailAttr") or "",
+        nameAttr=cfg.get("nameAttr") or "",
+        useTls=bool(cfg.get("useTls")),
+        connectTimeout=int(cfg.get("connectTimeout") or 5),
+        hasBindPassword=bool(cfg.get("hasBindPassword")),
+        updatedAt=cfg.get("updatedAt"),
+    )
 
 
 def _map_weather_source(data: dict) -> WeatherSourceType:
@@ -1206,6 +1251,17 @@ class Query:
         ]
 
     @strawberry.field
+    def ldap_config(self, info: strawberry.types.Info) -> LdapConfigType:
+        """Current LDAP configuration (admin only). Bind password is never returned."""
+        require_admin(info.context)
+        return _map_ldap_config(get_ldap_config())
+
+    @strawberry.field
+    def ldap_enabled(self) -> bool:
+        """Public flag so the login screen knows whether to show the LDAP tab."""
+        return is_ldap_enabled()
+
+    @strawberry.field
     def historical_readings(
         self,
         start_date: Optional[str] = None,
@@ -1423,6 +1479,23 @@ class LocationConfigInput:
     lat: float
     lon: float
     name: str
+
+
+@strawberry.input
+class LdapConfigInput:
+    enabled: bool = False
+    serverUrl: Optional[str] = None
+    baseDn: Optional[str] = None
+    bindDn: Optional[str] = None
+    bindPassword: Optional[str] = None
+    userSearchFilter: Optional[str] = None
+    emailAttr: Optional[str] = None
+    nameAttr: Optional[str] = None
+    useTls: Optional[bool] = False
+    connectTimeout: Optional[int] = None
+    # Solo se usan en testLdapConnection (probar credenciales de muestra).
+    sampleEmail: Optional[str] = None
+    samplePassword: Optional[str] = None
 
 
 # ============================================================================
@@ -1728,6 +1801,31 @@ class Mutation:
                 for item in result.get("fields", [])
             ],
             rawJson=result.get("rawJson") or "{}",
+        )
+
+    @strawberry.mutation(name="saveLdapConfig")
+    def save_ldap_config_mutation(
+        self, info: strawberry.types.Info, input: LdapConfigInput
+    ) -> LdapConfigType:
+        """Persist the LDAP connection settings. Admin only."""
+        require_admin(info.context)
+        cfg = save_ldap_config(input.__dict__)
+        return _map_ldap_config(cfg)
+
+    @strawberry.mutation(name="testLdapConnection")
+    async def test_ldap_connection_mutation(
+        self, info: strawberry.types.Info, input: LdapConfigInput
+    ) -> LdapTestResultType:
+        """
+        Probe the directory with the supplied (or stored) settings, optionally
+        verifying a sample login. Admin only. Never throws on connection failure.
+        """
+        require_admin(info.context)
+        result = await test_ldap_connection(input.__dict__)
+        return LdapTestResultType(
+            success=bool(result.get("success")),
+            message=result.get("message") or "",
+            sampleUser=result.get("sampleUser"),
         )
 
     @strawberry.mutation(name="seedHistoricalData")

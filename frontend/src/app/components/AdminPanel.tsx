@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { executeQuery, executeMutation } from '@/lib/graphql-client';
 import { useToast } from './ToastProvider';
+import LdapConfigManager from './LdapConfigManager';
 import { User } from '@/types';
 import {
     UserGroupIcon,
@@ -464,6 +465,9 @@ export default function AdminPanel({ currentUser, onBack, onLogout }: AdminPanel
                     </table>
                 </div>
             </div>
+
+            {/* LDAP / Directorio institucional */}
+            <LdapConfigManager />
 
             {/* Zona de cierre de sesión */}
             {onLogout && (

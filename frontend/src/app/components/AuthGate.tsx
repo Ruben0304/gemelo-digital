@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowPathIcon,
   SparklesIcon,
@@ -12,7 +12,7 @@ import {
   KeyIcon,
 } from '@heroicons/react/24/outline';
 import type { User } from '@/types';
-import { executeMutation } from '@/lib/graphql-client';
+import { executeMutation, executeQuery } from '@/lib/graphql-client';
 
 type AuthMode = 'login' | 'register' | 'ldap';
 
@@ -58,11 +58,27 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
   const [password, setPassword] = useState('');
   const [invitationCode, setInvitationCode] = useState('');
   const [ldapNeedsCode, setLdapNeedsCode] = useState(false);
+  const [ldapEnabled, setLdapEnabled] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
 
   const isRegister = mode === 'register';
   const isLdap = mode === 'ldap';
+
+  // La pestaña LDAP solo se ofrece si un administrador habilitó el directorio.
+  useEffect(() => {
+    let active = true;
+    executeQuery<{ ldapEnabled: boolean }>('query { ldapEnabled }', {}, 'network-only')
+      .then((data) => {
+        if (active) setLdapEnabled(Boolean(data?.ldapEnabled));
+      })
+      .catch(() => {
+        /* si falla, simplemente no mostramos la pestaña LDAP */
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const title = useMemo(() => {
     if (isRegister) return 'Crear cuenta';
@@ -297,7 +313,7 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
               <div className="relative">
                 <div className="flex rounded-full bg-slate-200/60 p-1 text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-500">
                   <span
-                    className="absolute inset-y-1 left-1 w-1/3 rounded-full bg-white shadow-lg shadow-slate-300/70 transition-transform duration-500 ease-out"
+                    className={`absolute inset-y-1 left-1 rounded-full bg-white shadow-lg shadow-slate-300/70 transition-transform duration-500 ease-out ${ldapEnabled ? 'w-1/3' : 'w-1/2'}`}
                     style={{ transform: `translateX(${modeIndex * 100}%)` }}
                   />
                   <button
@@ -318,15 +334,17 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
                   >
                     Registro
                   </button>
-                  <button
-                    type="button"
-                    aria-pressed={isLdap}
-                    onClick={() => handleModeChange('ldap')}
-                    className={`relative z-10 flex-1 rounded-full px-4 py-2 transition-colors ${isLdap ? 'text-slate-900' : 'hover:text-slate-700'
-                      }`}
-                  >
-                    LDAP
-                  </button>
+                  {ldapEnabled && (
+                    <button
+                      type="button"
+                      aria-pressed={isLdap}
+                      onClick={() => handleModeChange('ldap')}
+                      className={`relative z-10 flex-1 rounded-full px-4 py-2 transition-colors ${isLdap ? 'text-slate-900' : 'hover:text-slate-700'
+                        }`}
+                    >
+                      LDAP
+                    </button>
+                  )}
                 </div>
               </div>
 

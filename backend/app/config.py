@@ -29,18 +29,8 @@ class Settings:
     LATITUDE: float = 23.1136
     LONGITUDE: float = -82.3666
 
-    # LDAP authentication (optional)
-    LDAP_ENABLED: bool = os.getenv("LDAP_ENABLED", "false").lower() in ("1", "true", "yes")
-    LDAP_SERVER: str = os.getenv("LDAP_SERVER", "ldap://localhost:389")
-    LDAP_USE_TLS: bool = os.getenv("LDAP_USE_TLS", "false").lower() in ("1", "true", "yes")
-    LDAP_BASE_DN: str = os.getenv("LDAP_BASE_DN", "dc=cujae,dc=edu,dc=cu")
-    LDAP_BIND_USER: str = os.getenv("LDAP_BIND_USER", "")
-    LDAP_BIND_PASSWORD: str = os.getenv("LDAP_BIND_PASSWORD", "")
-    LDAP_USER_SEARCH_FILTER: str = os.getenv(
-        "LDAP_USER_SEARCH_FILTER", "(mail={email})"
-    )
-    LDAP_EMAIL_ATTR: str = os.getenv("LDAP_EMAIL_ATTR", "mail")
-    LDAP_NAME_ATTR: str = os.getenv("LDAP_NAME_ATTR", "cn")
+    # LDAP authentication is configured from the admin panel and stored in
+    # MongoDB (see app/services/ldap_config_service.py) — not via env vars.
 
     # JWT
     JWT_SECRET: str = os.getenv("JWT_SECRET", "gemelo-digital-cujae-secret-key-2024")

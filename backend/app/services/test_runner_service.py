@@ -52,6 +52,7 @@ _BACKEND_CATEGORIES: Dict[str, str] = {
     "test_invitation_service": "Autenticación y usuarios",
     "test_user_service": "Autenticación y usuarios",
     "test_user_service_integration": "Autenticación y usuarios",
+    "test_ldap_service": "Autenticación y usuarios",
     "test_crud_services": "CRUD de dispositivos",
     "test_inverter_service": "CRUD de dispositivos",
     "test_battery_discharge": "Baterías y apagones",
