@@ -33,7 +33,7 @@ class Settings:
     # MongoDB (see app/services/ldap_config_service.py) — not via env vars.
 
     # JWT
-    JWT_SECRET: str = os.getenv("JWT_SECRET", "gemelo-digital-cujae-secret-key-2024")
+    JWT_SECRET: str = os.environ["JWT_SECRET"]
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_DAYS: int = 7
 

@@ -158,6 +158,7 @@ const DASHBOARD_QUERY = `
       locationName
       lastUpdated
       description
+      isMock
       forecast {
         date
         dayOfWeek
@@ -679,17 +680,19 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
   }, [predictionsData, solarData]);
 
   // Consumo "ahora" desde la misma fuente que el gráfico (electrodomésticos/ML).
-  // Si no hay electrodomésticos configurados el valor es 0, igual que el gráfico.
+  // Si la predicción no cubre la hora actual (p. ej. de noche, fuera del rango
+  // diurno) o aún no hay predicciones cargadas, cae al snapshot real del sistema
+  // en vez de mostrar 0 —el consumo no se detiene de noche.
   const currentConsumption = useMemo(() => {
     if (mlPredictions.length > 0) {
       const nowHour = new Date().getHours();
       const match = mlPredictions.find(
         (p) => new Date(p.timestamp).getHours() === nowHour
       );
-      return match ? match.consumption : 0;
+      if (match) return match.consumption;
     }
-    return 0;
-  }, [mlPredictions]);
+    return solarData?.current.consumption ?? 0;
+  }, [mlPredictions, solarData]);
 
   // Fetch ML predictions for a specific day (7am-10pm)
   const fetchMLPredictionsForDay = useCallback(async (dayOffset: number) => {
@@ -784,7 +787,14 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
       setLastUpdate(new Date());
       setLoading(false);
 
-      // Load solar model info (R²) once
+      // Iniciar la carga de predicciones ML de inmediato. Su primera línea pone
+      // mlLoading=true y React la agrupa con el setLoading(false) de arriba, así
+      // el gráfico pasa directo a "Cargando…" sin el parpadeo de "No hay datos"
+      // (que aparecía mientras corría la consulta del modelo de abajo, sobre todo
+      // con internet lento o datos simulados).
+      const mlPromise = fetchMLPredictionsForDay(0);
+
+      // Load solar model info (R²) once — no es crítico, corre en paralelo.
       try {
         type ModelInfoResult = { mlModelInfo: { loaded: boolean; testR2?: number | null } };
         const modelInfo = await executeQuery<ModelInfoResult>(SOLAR_MODEL_INFO_QUERY);
@@ -795,8 +805,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
         // non-critical, skip silently
       }
 
-      // Load ML predictions for today after main data is loaded
-      await fetchMLPredictionsForDay(0);
+      await mlPromise;
     } catch (error: any) {
       console.error('Error fetching dashboard data:', error);
 
@@ -1004,6 +1013,17 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
           <div className="max-w-7xl mx-auto flex items-center gap-2 text-yellow-700 text-sm font-medium">
             <ExclamationTriangleIcon className="w-4 h-4" />
             <span>Red muy lenta detectada. Cargando datos demo del clima...</span>
+          </div>
+        </div>
+      )}
+
+      {!isOffline && !isSlowNetwork && weatherData?.isMock && (
+        <div className="bg-yellow-50 border-b border-yellow-200 px-4 py-2">
+          <div className="max-w-7xl mx-auto flex items-center gap-2 text-yellow-700 text-sm font-medium">
+            <ExclamationTriangleIcon className="w-4 h-4" />
+            <span>
+              Sin conexión con el servicio meteorológico. Mostrando datos de clima simulados (de prueba).
+            </span>
           </div>
         </div>
       )}

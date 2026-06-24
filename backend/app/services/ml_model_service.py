@@ -21,12 +21,12 @@ class MLModelService:
         self.model_loaded: bool = False
         self.models_dir = Path(__file__).parent.parent.parent / "models"
 
-    def load_model(self, model_name: str = "random_forest") -> None:
+    def load_model(self, model_name: str = "havana_v1") -> None:
         """
         Load the trained ML model and its metadata.
 
         Args:
-            model_name: Name of the model to load (default: 'random_forest')
+            model_name: Name of the model to load (default: 'havana_v1')
 
         Raises:
             FileNotFoundError: If model files are not found
@@ -171,6 +171,22 @@ class MLModelService:
         reference_capacity = self.metadata.get("reference_capacity_kw")
         try:
             return float(reference_capacity) if reference_capacity is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def get_test_r2(self) -> Optional[float]:
+        """
+        Return the model's coefficient of determination (R²) on the test set.
+
+        This is the *real* generalization metric measured during training and is
+        the honest basis for a "confidence" figure shown to the user — not an
+        ad-hoc formula.
+        """
+        if not self.metadata:
+            return None
+        r2 = self.metadata.get("test_r2")
+        try:
+            return float(r2) if r2 is not None else None
         except (TypeError, ValueError):
             return None
 

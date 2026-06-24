@@ -10,6 +10,21 @@ import mongomock
 import app.database as _db_module
 
 
+@pytest.fixture(autouse=True)
+def _reset_weather_cache():
+    """
+    El caché de clima es un singleton de módulo (hoy+mañana, TTL 5 min) que
+    persiste entre tests. Se vacía antes y después de cada test para que las
+    llamadas mockeadas con respx siempre se ejerzan y no haya contaminación
+    cruzada por datos cacheados.
+    """
+    from app.services.weather_cache_service import weather_cache
+
+    weather_cache.reset()
+    yield
+    weather_cache.reset()
+
+
 @pytest.fixture()
 def mongo_db(monkeypatch):
     """

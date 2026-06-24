@@ -9,6 +9,7 @@ from typing import Any, Dict
 from .analytics import calculate_energy_flow, calculate_system_metrics
 from .prediction_service import (
     build_projected_solar_timeline,
+    central_production_override,
     generate_battery_projection,
     generate_hourly_predictions,
 )
@@ -24,7 +25,10 @@ async def get_solar_snapshot() -> Dict[str, Any]:
         config["solar"]["capacityKw"],
         config["location"]["name"],
     )
-    predictions = generate_hourly_predictions(weather_data["forecast"], config)
+    override = await central_production_override(24, config)
+    predictions = generate_hourly_predictions(
+        weather_data["forecast"], config, production_override=override
+    )
     projected_timeline = build_projected_solar_timeline(
         predictions,
         config["battery"],

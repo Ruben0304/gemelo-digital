@@ -18,7 +18,7 @@ services:
       MONGODB_URI: mongodb://mongodb:27017/GemeloDigitalCujai
       MONGODB_DB: GemeloDigitalCujai
       CORS_ORIGINS: http://localhost:3000
-      JWT_SECRET: ${JWT_SECRET:-gemelo-digital-cujae-secret-key-2024}
+      JWT_SECRET: ${JWT_SECRET}
     depends_on:
       - mongodb
 

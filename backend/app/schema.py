@@ -182,6 +182,7 @@ class WeatherDataType:
     description: Optional[str]
     weatherCode: Optional[int]
     sourceError: Optional[str]
+    isMock: bool = False
 
 
 @strawberry.type
@@ -648,6 +649,7 @@ def _map_weather(data: dict) -> WeatherDataType:
         description=data.get("description"),
         weatherCode=data.get("weatherCode"),
         sourceError=data.get("sourceError"),
+        isMock=bool(data.get("isMock", False)),
     )
 
 

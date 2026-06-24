@@ -162,7 +162,20 @@ def _calculate_prediction_confidence(hours_ahead: int, cloud_cover: float) -> fl
     return max(50, min(95, confidence))
 
 
-def generate_hourly_predictions(weather_forecast: List[Dict[str, Any]], config: Dict[str, Any], hours: int = 24) -> List[Dict[str, Any]]:
+def generate_hourly_predictions(
+    weather_forecast: List[Dict[str, Any]],
+    config: Dict[str, Any],
+    hours: int = 24,
+    production_override: Optional[List[float]] = None,
+) -> List[Dict[str, Any]]:
+    """Genera la predicción horaria de producción/consumo.
+
+    Si ``production_override`` se proporciona (producción en kW reales por offset
+    horario, calculada por el servicio central de predicción), se usa en lugar de
+    la fórmula heredada. Así el dashboard reutiliza el mismo motor (ML/física +
+    sombra + orientación) que el resto de la app. Sin override, se mantiene el
+    comportamiento anterior intacto.
+    """
     predictions: List[Dict[str, Any]] = []
     # Hora local de La Habana (no UTC): la curva diaria y el corte día/noche se
     # calculan sobre la hora solar local, si no la producción "actual" sale
@@ -179,9 +192,14 @@ def generate_hourly_predictions(weather_forecast: List[Dict[str, Any]], config: 
         if not forecast:
             continue
 
-        solar_radiation = _estimate_hourly_solar_radiation(hour, forecast["solarRadiation"], forecast["cloudCover"])
-        temperature = _estimate_hourly_temperature(hour, forecast["maxTemp"], forecast["minTemp"])
-        production = predict_production(solar_radiation, temperature, forecast["cloudCover"], hour, context)
+        if production_override is not None and hour_offset < len(production_override):
+            # Producción del servicio central (ML/física + sombra + orientación).
+            production = round(max(0.0, float(production_override[hour_offset])), 2)
+        else:
+            # Fórmula heredada (fallback si el motor central no está disponible).
+            solar_radiation = _estimate_hourly_solar_radiation(hour, forecast["solarRadiation"], forecast["cloudCover"])
+            temperature = _estimate_hourly_temperature(hour, forecast["maxTemp"], forecast["minTemp"])
+            production = predict_production(solar_radiation, temperature, forecast["cloudCover"], hour, context)
         consumption = _consumption_from_appliances(timestamp)
         confidence = _calculate_prediction_confidence(hour_offset, forecast["cloudCover"])
 
@@ -436,6 +454,38 @@ def generate_recommendations(
     return recommendations
 
 
+async def central_production_override(hours: int, config: Dict[str, Any]) -> Optional[List[float]]:
+    """Producción horaria (kW reales) desde el servicio central de predicción,
+    alineada por offset horario desde "ahora" (hora local de La Habana).
+
+    Devuelve None si el motor no está disponible o la configuración no permite
+    escalar (sin capacidad o sin capacidad de referencia). En ese caso el
+    llamador cae a la fórmula heredada y nada deja de funcionar.
+    """
+    from .production_forecast_service import get_production_service
+    from .ml_model_service import ml_model_service
+
+    try:
+        reference = ml_model_service.get_reference_capacity_kw() or 1.0
+        if reference <= 0:
+            return None
+        capacity = float(config["solar"].get("capacityKw") or 0)
+        if capacity <= 0:
+            return None
+        hours = max(1, min(int(hours), 24 * 7))
+        now = datetime.now(ZoneInfo("America/Havana")).replace(tzinfo=None)
+        datetimes = [(now + timedelta(hours=h)).isoformat() for h in range(hours)]
+        preds = await get_production_service().predict(
+            datetimes, config["location"]["lat"], config["location"]["lon"]
+        )
+        if not preds:
+            return None
+        scale = capacity / reference
+        return [round(float(p["production_kw"]) * scale, 2) for p in preds]
+    except Exception:
+        return None
+
+
 async def get_predictions_bundle(hours: int = 24) -> Dict[str, Any]:
     config = get_system_config()
     weather_data = await get_weather_with_fallback(
@@ -444,7 +494,10 @@ async def get_predictions_bundle(hours: int = 24) -> Dict[str, Any]:
         config["solar"]["capacityKw"],
         config["location"]["name"],
     )
-    predictions = generate_hourly_predictions(weather_data["forecast"], config, hours=hours)
+    override = await central_production_override(hours, config)
+    predictions = generate_hourly_predictions(
+        weather_data["forecast"], config, hours=hours, production_override=override
+    )
     timeline = build_projected_solar_timeline(predictions, config["battery"], 75)
     battery_projection = generate_battery_projection(
         timeline,

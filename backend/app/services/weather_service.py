@@ -12,10 +12,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 from .system_defaults import DEFAULT_SYSTEM_CONFIG
+from .weather_cache_service import weather_cache
 from .weather_source_service import get_active_weather_data, get_active_weather_source
 
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
-OPENMETEO_BASE_URL = "https://api.open-meteo.com/v1/forecast"
 CACHE_TTL_SECONDS = 60
 
 _cached_snapshot: Optional[Dict[str, Any]] = None
@@ -74,47 +74,16 @@ async def fetch_open_meteo_weather(
     capacity_kw: float,
     location_name: str = "Ubicación",
 ) -> Dict[str, Any]:
-    params_current = {
-        "latitude": lat,
-        "longitude": lon,
-        "current": ",".join(
-            [
-                "temperature_2m",
-                "relative_humidity_2m",
-                "wind_speed_10m",
-                "cloud_cover",
-                "shortwave_radiation",
-                "weather_code",
-            ]
-        ),
-        "timezone": "auto",
-    }
-    params_daily = {
-        "latitude": lat,
-        "longitude": lon,
-        "daily": ",".join(
-            [
-                "temperature_2m_max",
-                "temperature_2m_min",
-                "weather_code",
-                "cloud_cover_mean",
-                "shortwave_radiation_sum",
-            ]
-        ),
-        "forecast_days": 7,
-        "timezone": "auto",
-    }
+    # El JSON crudo de Open-Meteo (current + daily) viene del caché global, que
+    # hace una sola petición cada 5 min y la comparte con toda la app.
+    raw = await weather_cache.get_display_raw(lat, lon)
+    return _build_display_payload(raw, capacity_kw, location_name)
 
-    async with httpx.AsyncClient(timeout=5) as client:
-        current_res, daily_res = await client.get(OPENMETEO_BASE_URL, params=params_current), await client.get(
-            OPENMETEO_BASE_URL, params=params_daily
-        )
 
-    current_res.raise_for_status()
-    daily_res.raise_for_status()
-
-    current_data = current_res.json()
-    daily_data = daily_res.json()
+def _build_display_payload(
+    raw: Dict[str, Any], capacity_kw: float, location_name: str
+) -> Dict[str, Any]:
+    daily_data = raw
     forecast: List[Dict[str, Any]] = []
     for idx, date_str in enumerate(daily_data["daily"]["time"]):
         date_obj = datetime.fromisoformat(date_str)
@@ -136,7 +105,8 @@ async def fetch_open_meteo_weather(
             }
         )
 
-    current = current_data["current"]
+    current = raw["current"]
+    is_mock = bool(raw.get("_is_mock"))
     return {
         "temperature": current["temperature_2m"],
         "solarRadiation": round(current["shortwave_radiation"]),
@@ -144,11 +114,15 @@ async def fetch_open_meteo_weather(
         "humidity": round(current["relative_humidity_2m"]),
         "windSpeed": current["wind_speed_10m"],
         "forecast": forecast,
-        "provider": "Open-Meteo API",
+        "provider": "Datos de prueba (sin conexión)" if is_mock else "Open-Meteo API",
         "locationName": location_name,
         "lastUpdated": datetime.utcnow().isoformat(),
-        "description": _weather_description(current["weather_code"]),
+        "description": (
+            "Datos simulados por falta de conexión con el servicio meteorológico"
+            if is_mock else _weather_description(current["weather_code"])
+        ),
         "weatherCode": current["weather_code"],
+        "isMock": is_mock,
     }
 
 
@@ -336,6 +310,7 @@ def _generate_fallback_weather_data(solar_capacity_kw: float) -> Dict[str, Any]:
         "locationName": "Ubicación simulada",
         "lastUpdated": datetime.utcnow().isoformat(),
         "description": "Datos simulados por indisponibilidad de OpenWeather",
+        "isMock": True,
     }
 
 

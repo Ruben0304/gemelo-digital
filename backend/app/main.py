@@ -32,6 +32,13 @@ async def _periodic_snapshot_saver():
             await asyncio.sleep(300)  # 5 minutes
             from app.services.solar_service import get_solar_snapshot
             from app.services.lectura_service import save_reading
+            from app.services.weather_cache_service import weather_cache
+            from app.services.system_config import get_system_config
+
+            # Refresca el caché de clima (hoy+mañana) cada 5 min, sobrescribiendo.
+            cfg = get_system_config()
+            await weather_cache.preload(cfg["location"]["lat"], cfg["location"]["lon"])
+
             snapshot_data = await get_solar_snapshot()
             production_kw = snapshot_data.get("current", {}).get("production", 0)
             save_reading(production_kw)
@@ -64,6 +71,18 @@ async def lifespan(app: FastAPI):
         print(f"⚠️  Warning: Could not load solar production prediction model: {e}")
         print("   Solar production prediction endpoint will not be available.")
         print("   Please run the training script: backend/notebooks/train_solar_havana.py")
+
+    # Warm the global weather cache (today + tomorrow) with a single call so the
+    # first dashboard/predictor request is served from memory.
+    try:
+        from app.services.weather_cache_service import weather_cache
+        from app.services.system_config import get_system_config
+
+        cfg = get_system_config()
+        await weather_cache.preload(cfg["location"]["lat"], cfg["location"]["lon"])
+        print("🌤️  Weather cache warmed (today + tomorrow).")
+    except Exception as e:
+        print(f"⚠️  Warning: could not warm weather cache: {e}")
 
     # Start background task for historical data collection
     task = asyncio.create_task(_periodic_snapshot_saver())

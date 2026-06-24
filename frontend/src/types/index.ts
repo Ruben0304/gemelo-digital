@@ -23,6 +23,7 @@ export interface WeatherData {
   lastUpdated?: string;    // ISO string for data timestamp
   description?: string;    // Textual weather summary
   weatherCode?: number;    // WMO weather code
+  isMock?: boolean;        // true => datos de prueba (sin conexión con Open-Meteo)
 }
 
 export interface DayForecast {
