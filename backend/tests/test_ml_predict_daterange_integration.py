@@ -161,6 +161,28 @@ def live_predictions(real_model, date_range):
     return preds
 
 
+@pytest.fixture(scope="module")
+def historical_predictions(real_model):
+    """
+    Predicción para un rango de hace ~1 año: fuerza el camino del Archive API
+    (ERA5), que es el que alimenta el modo 'Histórico' de la pantalla.
+    """
+    end = dt.date.today() - dt.timedelta(days=365)
+    start = end - dt.timedelta(days=2)
+    r = _gql(
+        _Q_DATE_RANGE,
+        {"startDate": start.isoformat(), "endDate": end.isoformat(), "lat": _LAT, "lon": _LON},
+    )
+    if r["errors"]:
+        if _looks_like_network_error(r["errors"]):
+            pytest.skip(f"Open-Meteo Archive no alcanzable; se omite: {r['errors']}")
+        pytest.fail(f"mlPredictDateRange (histórico) devolvió errores: {r['errors']}")
+    preds = r["data"]["mlPredictDateRange"]
+    if not preds:
+        pytest.skip("El archivo no devolvió datos para el rango histórico; se omite.")
+    return preds
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # TestMlPredictDateRangeIntegration
 # ─────────────────────────────────────────────────────────────────────────────
@@ -225,3 +247,88 @@ class TestMlPredictDateRangeIntegration:
             for day, kwh in sorted(daily.items())
         ]
         assert all("label" in pt and "Producción" in pt for pt in chart)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestMlPredictDateRangeHistorical — modo 'Histórico' vía Archive API (ERA5)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestMlPredictDateRangeHistorical:
+    """
+    Para fechas antiguas el backend enruta al Archive API de Open-Meteo. Estos
+    tests verifican que ese camino devuelve datos REALES (no el mock determinista)
+    y utilizables para reconstruir el histórico con el modelo.
+    """
+
+    def test_devuelve_datos_para_fecha_antigua(self, historical_predictions):
+        assert len(historical_predictions) >= 24
+        assert all(p["productionKw"] >= 0 for p in historical_predictions)
+
+    def test_no_es_el_mock_determinista(self, historical_predictions):
+        """
+        El mock interno produce siempre nubosidad constante (20%) y pico de
+        radiación exacto de 900 W/m². Datos reales del archivo varían: si vemos
+        variedad de nubosidad y un pico distinto de 900, vienen de Open-Meteo.
+        """
+        clouds = {round(p["weather"]["shortwaveRadiation"]) for p in historical_predictions}
+        cloud_cover = {round(p["weather"]["cloudCover"]) for p in historical_predictions}
+        rad_max = max(p["weather"]["shortwaveRadiation"] for p in historical_predictions)
+        assert len(cloud_cover) > 2, "Nubosidad constante ⇒ probablemente datos mock."
+        assert rad_max != 900.0, "Pico de 900 exacto ⇒ probablemente datos mock."
+        assert len(clouds) > 2
+
+    def test_agregacion_diaria_historica(self, historical_predictions):
+        daily = _to_daily_kwh(historical_predictions)
+        assert len(daily) >= 1
+        assert all(v >= 0 for v in daily.values())
+        assert any(v > 1.0 for v in daily.values()), \
+            "Se esperaba al menos un día histórico con producción significativa."
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestMonthlyProduction — pastel anual (histórico pasado + climatología futura)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_Q_MONTHLY = """
+query {
+  monthlyProduction {
+    month
+    monthName
+    productionKwh
+    source
+  }
+}
+"""
+
+
+@pytest.fixture(scope="module")
+def monthly(real_model):
+    r = _gql(_Q_MONTHLY)
+    if r["errors"]:
+        if _looks_like_network_error(r["errors"]):
+            pytest.skip(f"Open-Meteo no alcanzable; se omite: {r['errors']}")
+        pytest.fail(f"monthlyProduction devolvió errores: {r['errors']}")
+    return r["data"]["monthlyProduction"]
+
+
+class TestMonthlyProduction:
+    """El pastel anual mezcla histórico (pasado) y predicción (futuro) por mes."""
+
+    def test_devuelve_doce_meses(self, monthly):
+        assert len(monthly) == 12
+        assert [m["month"] for m in monthly] == list(range(1, 13))
+
+    def test_produccion_no_negativa_y_con_datos(self, monthly):
+        assert all(m["productionKwh"] >= 0 for m in monthly)
+        assert sum(m["productionKwh"] for m in monthly) > 0
+
+    def test_origen_coherente_con_el_mes_actual(self, monthly):
+        """Meses anteriores → histórico; el actual → mixto; los futuros → predicción."""
+        current = dt.date.today().month
+        by_month = {m["month"]: m["source"] for m in monthly}
+        assert all(s in {"historico", "prediccion", "mixto"} for s in by_month.values())
+        if current > 1:
+            assert by_month[current - 1] == "historico"
+        if current < 12:
+            assert by_month[current + 1] == "prediccion"
+        assert by_month[current] == "mixto"

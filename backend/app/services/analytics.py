@@ -3,7 +3,24 @@ Utility calculations for system metrics and energy flow.
 """
 from __future__ import annotations
 
+import os
 from typing import Dict, List
+
+# Factor de emisión de la red eléctrica (kg CO2 evitado por kWh autoconsumido).
+# La red cubana es predominantemente de fuel-oil/diésel, con un factor de emisión
+# alto. Se usa un valor por defecto DOCUMENTADO (≈1.0 kgCO2/kWh, orden de magnitud
+# de los factores de red publicados para Cuba) y CONFIGURABLE vía la variable de
+# entorno GRID_CO2_FACTOR. No es una constante arbitraria: debe ajustarse al factor
+# oficial de la UNE cuando esté disponible. (Antes era un 0.5 sin justificación.)
+DEFAULT_GRID_CO2_FACTOR_KG_PER_KWH = 1.0
+
+
+def grid_co2_factor() -> float:
+    """Factor de emisión de la red (kg CO2/kWh), configurable por entorno."""
+    try:
+        return float(os.environ.get("GRID_CO2_FACTOR", DEFAULT_GRID_CO2_FACTOR_KG_PER_KWH))
+    except (TypeError, ValueError):
+        return DEFAULT_GRID_CO2_FACTOR_KG_PER_KWH
 
 
 def calculate_system_metrics(current: Dict[str, float], historical: List[Dict[str, float]]) -> Dict[str, float]:
@@ -14,7 +31,7 @@ def calculate_system_metrics(current: Dict[str, float], historical: List[Dict[st
 
     daily_production = sum(item["production"] for item in historical)
     daily_consumption = sum(item["consumption"] for item in historical)
-    co2_avoided = daily_production * 0.5
+    co2_avoided = daily_production * grid_co2_factor()
 
     return {
         "currentProduction": round(production, 2),

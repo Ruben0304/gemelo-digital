@@ -28,6 +28,12 @@ import type {
   SystemConfig,
 } from '@/types';
 import { executeMutation } from '@/lib/graphql-client';
+import {
+  getSoilingThreshold,
+  setSoilingThreshold,
+  SOILING_THRESHOLD_MIN,
+  SOILING_THRESHOLD_MAX,
+} from '@/lib/soiling';
 import AppliancesManager from './AppliancesManager';
 import WeatherSourceManager from './WeatherSourceManager';
 import ConfirmDialog from './ConfirmDialog';
@@ -317,6 +323,12 @@ export default function DevicesView({
     porcentaje_sucio: number;
   } | null>(null);
   const [cleanlinessError, setCleanlinessError] = useState<string | null>(null);
+  // Umbral de suciedad (% sucio) a partir del cual se considera el panel sucio.
+  // Compartido con la alerta del Dashboard vía localStorage (lib/soiling).
+  const [soilingThreshold, setSoilingThresholdState] = useState<number>(50);
+  useEffect(() => {
+    setSoilingThresholdState(getSoilingThreshold());
+  }, []);
 
   useEffect(() => {
     if (!panelMessage) return;
@@ -1757,6 +1769,33 @@ export default function DevicesView({
           onClose={() => setCleanlinessModalOpen(false)}
         >
           <div className="space-y-5">
+            {/* Umbral de suciedad configurable (compartido con la alerta del Dashboard) */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center justify-between mb-2">
+                <label htmlFor="soiling-threshold" className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Considerar sucio a partir de
+                </label>
+                <span className="text-sm font-bold text-rose-600">{soilingThreshold}% de suciedad</span>
+              </div>
+              <input
+                id="soiling-threshold"
+                type="range"
+                min={SOILING_THRESHOLD_MIN}
+                max={SOILING_THRESHOLD_MAX}
+                step={5}
+                value={soilingThreshold}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setSoilingThresholdState(v);
+                  setSoilingThreshold(v);
+                }}
+                className="w-full accent-rose-500"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Por encima de este nivel de suciedad, el panel se marca como sucio y el panel de control muestra una alerta.
+              </p>
+            </div>
+
             {/* Upload section - only show if no results */}
             {!cleanlinessResult && (
               <div className="space-y-4">
@@ -1835,23 +1874,23 @@ export default function DevicesView({
                 <div className="text-center py-4">
                   <div
                     className={`inline-flex items-center gap-3 rounded-xl px-8 py-4 shadow-sm ${
-                      cleanlinessResult.clasificacion === 'limpio'
+                      cleanlinessResult.porcentaje_sucio < soilingThreshold
                         ? 'bg-emerald-50 border border-emerald-200'
                         : 'bg-amber-50 border border-amber-200'
                     }`}
                   >
                     <span className="text-3xl">
-                      {cleanlinessResult.clasificacion === 'limpio' ? '✓' : '⚠'}
+                      {cleanlinessResult.porcentaje_sucio < soilingThreshold ? '✓' : '⚠'}
                     </span>
                     <div className="text-left">
                       <p
                         className={`text-lg font-bold ${
-                          cleanlinessResult.clasificacion === 'limpio'
+                          cleanlinessResult.porcentaje_sucio < soilingThreshold
                             ? 'text-emerald-700'
                             : 'text-amber-700'
                         }`}
                       >
-                        {cleanlinessResult.clasificacion === 'limpio'
+                        {cleanlinessResult.porcentaje_sucio < soilingThreshold
                           ? 'Panel limpio'
                           : 'Panel con suciedad'}
                       </p>
@@ -1903,7 +1942,7 @@ export default function DevicesView({
                     Recomendación
                   </p>
                   <p className="text-sm text-slate-700 leading-relaxed">
-                    {cleanlinessResult.clasificacion === 'limpio'
+                    {cleanlinessResult.porcentaje_sucio < soilingThreshold
                       ? 'El panel se encuentra en buen estado de limpieza. La producción de energía no debería verse afectada significativamente.'
                       : 'Se recomienda realizar una limpieza del panel solar. La suciedad acumulada puede reducir la eficiencia de producción energética hasta en un 25%.'}
                   </p>

@@ -12,6 +12,7 @@ from .prediction_service import (
     central_production_override,
     generate_battery_projection,
     generate_hourly_predictions,
+    _system_efficiency_pct,
 )
 from .system_config import get_system_config
 from .weather_service import get_weather_with_fallback
@@ -32,6 +33,7 @@ async def get_solar_snapshot() -> Dict[str, Any]:
     projected_timeline = build_projected_solar_timeline(
         predictions,
         config["battery"],
+        system_efficiency_pct=_system_efficiency_pct(config),
     )
 
     if not projected_timeline:

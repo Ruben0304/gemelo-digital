@@ -32,6 +32,11 @@ from app.services.appliance_service import (
     update_appliance,
     delete_appliance,
 )
+from app.services.panel_cleanliness_service import (
+    save_cleanliness_reading,
+    get_latest_cleanliness,
+    list_cleanliness_readings,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -248,3 +253,55 @@ class TestApplianceService:
         payload = {**APPLIANCE_PAYLOAD, "name": ""}
         with pytest.raises(ValueError):
             create_appliance(payload)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Panel cleanliness service (registro histórico de limpieza de paneles)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestPanelCleanlinessService:
+
+    def test_guardar_lectura_devuelve_documento_con_id(self, mongo_db):
+        reading = save_cleanliness_reading("limpio", 92.5, 7.5)
+        assert "_id" in reading
+        assert isinstance(reading["_id"], str)
+
+    def test_guardar_lectura_persiste_campos(self, mongo_db):
+        reading = save_cleanliness_reading("sucio", 30.0, 70.0)
+        assert reading["clasificacion"] == "sucio"
+        assert reading["porcentajeLimpio"] == pytest.approx(30.0)
+        assert reading["porcentajeSucio"] == pytest.approx(70.0)
+
+    def test_source_por_defecto_es_manual(self, mongo_db):
+        reading = save_cleanliness_reading("limpio", 80.0, 20.0)
+        assert reading["source"] == "manual"
+
+    def test_source_se_puede_especificar(self, mongo_db):
+        reading = save_cleanliness_reading("limpio", 80.0, 20.0, source="camara")
+        assert reading["source"] == "camara"
+
+    def test_ultima_lectura_sin_datos_devuelve_none(self, mongo_db):
+        assert get_latest_cleanliness() is None
+
+    def test_ultima_lectura_devuelve_la_mas_reciente(self, mongo_db):
+        save_cleanliness_reading("limpio", 90.0, 10.0)
+        save_cleanliness_reading("sucio", 25.0, 75.0)
+        latest = get_latest_cleanliness()
+        assert latest is not None
+        assert latest["clasificacion"] == "sucio"
+        assert latest["porcentajeLimpio"] == pytest.approx(25.0)
+
+    def test_listar_devuelve_lecturas_mas_reciente_primero(self, mongo_db):
+        save_cleanliness_reading("limpio", 90.0, 10.0)
+        save_cleanliness_reading("sucio", 40.0, 60.0)
+        readings = list_cleanliness_readings()
+        assert len(readings) == 2
+        assert readings[0]["clasificacion"] == "sucio"
+
+    def test_listar_sin_datos_devuelve_lista_vacia(self, mongo_db):
+        assert list_cleanliness_readings() == []
+
+    def test_lectura_incluye_timestamp(self, mongo_db):
+        reading = save_cleanliness_reading("limpio", 88.0, 12.0)
+        assert "timestamp" in reading
+        assert isinstance(reading["timestamp"], str)

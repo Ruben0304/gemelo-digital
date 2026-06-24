@@ -13,6 +13,9 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
+  PieChart,
+  Pie,
+  Cell,
 } from 'recharts';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -42,26 +45,71 @@ import type {
 
 // ─── GraphQL queries ────────────────────────────────────────────────────────
 
-const HISTORICAL_READINGS_QUERY = `
-  query HistoricalReadings($startDate: String, $endDate: String, $limit: Int) {
-    historicalReadings(startDate: $startDate, endDate: $endDate, limit: $limit) {
-      _id
-      timestamp
+// Predicción de producción del backend: el MISMO modelo ML que alimenta el gráfico
+// de producción vs consumo del Dashboard (ProductionForecastService → Random Forest
+// + motor strategy + sombras + orientación + escalado por capacidad). Su hermana de
+// un solo día es `mlPredictForHours`; aquí usamos la variante multi-día para cubrir
+// la ventana del pronóstico. El frontend NO calcula física: solo totaliza por día.
+const ML_PREDICT_DATE_RANGE_QUERY = `
+  query MLPredictDateRange($startDate: String!, $endDate: String!) {
+    mlPredictDateRange(startDate: $startDate, endDate: $endDate) {
+      datetime
       productionKw
     }
   }
 `;
 
-const DAILY_SUMMARIES_QUERY = `
-  query DailySummaries($days: Int) {
-    dailySummaries(days: $days) {
-      date
-      totalProductionKwh
-      maxProductionKw
-      readingCount
+type MlPredictionRow = { datetime: string; productionKw: number };
+
+// Producción por mes del año (pastel): el backend mezcla histórico real de los
+// meses pasados con climatología (mismo mes del año anterior) para lo que falta.
+const MONTHLY_PRODUCTION_QUERY = `
+  query MonthlyProduction {
+    monthlyProduction {
+      month
+      monthName
+      productionKwh
+      source
     }
   }
 `;
+
+type MonthlySource = 'historico' | 'prediccion' | 'mixto';
+type MonthlyProduction = {
+  month: number;
+  monthName: string;
+  productionKwh: number;
+  source: MonthlySource;
+};
+
+// Color del gajo según su origen, para que la mezcla sea visible de un vistazo.
+const MONTHLY_COLORS: Record<MonthlySource, string> = {
+  historico: '#f59e0b', // ámbar — dato real
+  mixto: '#10b981', // esmeralda — mes en curso
+  prediccion: '#38bdf8', // celeste — estimación futura
+};
+const MONTHLY_SOURCE_LABEL: Record<MonthlySource, string> = {
+  historico: 'Histórico',
+  mixto: 'Mes en curso',
+  prediccion: 'Predicción',
+};
+
+// Paleta estacional (Ene→Dic): recorre la rueda de color de invierno a verano y
+// vuelve, para que el pastel se lea bonito y cada mes tenga su tono propio.
+const MONTH_COLORS = [
+  '#60a5fa', // Ene — azul invierno
+  '#38bdf8', // Feb — celeste
+  '#22d3ee', // Mar — cian
+  '#2dd4bf', // Abr — turquesa
+  '#34d399', // May — verde
+  '#a3e635', // Jun — lima
+  '#facc15', // Jul — amarillo (pico de verano)
+  '#fbbf24', // Ago — ámbar
+  '#fb923c', // Sep — naranja
+  '#f472b6', // Oct — rosa otoño
+  '#c084fc', // Nov — púrpura
+  '#818cf8', // Dic — índigo
+];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -80,6 +128,41 @@ const formatEnergy = (value: number): string => {
   if (value >= 1_000) return `${(value / 1_000).toFixed(2)} MWh`;
   return `${value.toFixed(1)} kWh`;
 };
+
+const todayStr = (): string => format(new Date(), 'yyyy-MM-dd');
+
+// Reconstruye las estructuras del histórico (lecturas horarias + resumen diario)
+// a partir de la predicción horaria del backend. NO hay física en el frontend:
+// solo se totaliza por día (kW · 1 h = kWh) y se calcula el pico, igual que hacía
+// el backend con las lecturas reales — pero ahora la fuente es el modelo.
+function buildHistFromMl(rows: MlPredictionRow[]): {
+  readings: HistoricalReading[];
+  summaries: DailySummary[];
+} {
+  const readings: HistoricalReading[] = rows.map((r) => ({
+    _id: r.datetime,
+    timestamp: r.datetime,
+    productionKw: r.productionKw,
+  }));
+
+  const byDay = new Map<string, { total: number; max: number; count: number }>();
+  for (const r of rows) {
+    const day = r.datetime.slice(0, 10);
+    const acc = byDay.get(day) ?? { total: 0, max: 0, count: 0 };
+    acc.total += r.productionKw;
+    acc.max = Math.max(acc.max, r.productionKw);
+    acc.count += 1;
+    byDay.set(day, acc);
+  }
+  const summaries: DailySummary[] = [...byDay.entries()].map(([date, a]) => ({
+    date,
+    totalProductionKwh: Number(a.total.toFixed(2)),
+    maxProductionKw: Number(a.max.toFixed(2)),
+    readingCount: a.count,
+  }));
+
+  return { readings, summaries };
+}
 
 type Mode = 'historico' | 'prediccion';
 type HistView = 'daily' | 'hourly';
@@ -146,40 +229,122 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState(14);
+  // 'reciente' = últimos N días hasta hoy (Open-Meteo /forecast).
+  // 'historico' = un período pasado a elegir (Open-Meteo Archive API, hasta 1940).
+  const [histSource, setHistSource] = useState<'reciente' | 'historico'>('reciente');
+  const [endDate, setEndDate] = useState<string>(() => todayStr());
+
+  // ── Prediction (ML) state ──
+  // Producción diaria (kWh) agregada desde la predicción horaria del backend,
+  // indexada por fecha YYYY-MM-DD. Vacío ⇒ se respalda con el valor del pronóstico.
+  const [mlDaily, setMlDaily] = useState<Map<string, number>>(new Map());
+  const [predLoading, setPredLoading] = useState(false);
+  const [predError, setPredError] = useState<string | null>(null);
+
+  // ── Monthly pie (annual) state ──
+  const [monthly, setMonthly] = useState<MonthlyProduction[]>([]);
+  const [monthlyLoading, setMonthlyLoading] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      if (histView === 'daily') {
-        const data = await executeQuery<{ dailySummaries: DailySummary[] }>(
-          DAILY_SUMMARIES_QUERY,
-          { days },
-          'network-only',
-        );
-        setSummaries(data?.dailySummaries ?? []);
-      } else {
-        const now = new Date();
-        const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-        const data = await executeQuery<{ historicalReadings: HistoricalReading[] }>(
-          HISTORICAL_READINGS_QUERY,
-          { startDate: start.toISOString(), endDate: now.toISOString(), limit: days * 24 },
-          'network-only',
-        );
-        setReadings(data?.historicalReadings ?? []);
-      }
+      // El histórico se RECONSTRUYE con el modelo del backend sobre el clima de
+      // Open-Meteo del período pedido. 'reciente' termina hoy (el backend usa
+      // /forecast); 'historico' termina en una fecha pasada (el backend enruta al
+      // Archive API). El frontend solo pide y totaliza, sin tocar lecturas_historicas.
+      const end = histSource === 'reciente' ? todayStr() : endDate;
+      const endMs = new Date(`${end}T00:00:00`).getTime();
+      const startStr = format(new Date(endMs - (days - 1) * 86_400_000), 'yyyy-MM-dd');
+      const data = await executeQuery<{ mlPredictDateRange: MlPredictionRow[] }>(
+        ML_PREDICT_DATE_RANGE_QUERY,
+        { startDate: `${startStr}T00:00:00`, endDate: `${end}T23:00:00` },
+        'network-only',
+      );
+      const { readings: r, summaries: s } = buildHistFromMl(data?.mlPredictDateRange ?? []);
+      setReadings(r);
+      setSummaries(s);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error cargando datos históricos.');
+      setError(err instanceof Error ? err.message : 'Error reconstruyendo el histórico con el modelo.');
+      setReadings([]);
+      setSummaries([]);
     } finally {
       setLoading(false);
     }
-  }, [histView, days]);
+  }, [days, endDate, histSource]);
 
   // El histórico se carga al entrar en modo histórico (o al cambiar vista/período).
   // Las predicciones derivan del pronóstico ya disponible: no requieren red.
   useEffect(() => {
     if (mode === 'historico') fetchData();
   }, [mode, fetchData]);
+
+  // El pastel anual es independiente del período: se pide una vez al entrar en
+  // Histórico. El backend mezcla histórico real + climatología; el front solo pinta.
+  useEffect(() => {
+    if (mode !== 'historico' || monthly.length > 0) return;
+    let cancelled = false;
+    (async () => {
+      setMonthlyLoading(true);
+      try {
+        const data = await executeQuery<{ monthlyProduction: MonthlyProduction[] }>(
+          MONTHLY_PRODUCTION_QUERY,
+          {},
+          'network-only',
+        );
+        if (!cancelled) setMonthly(data?.monthlyProduction ?? []);
+      } catch {
+        if (!cancelled) setMonthly([]);
+      } finally {
+        if (!cancelled) setMonthlyLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, monthly.length]);
+
+  // La predicción se pide al mismo modelo ML del backend que usa el Dashboard.
+  // Se totalizan las horas devueltas a kWh/día (kW · 1 h = kWh): el frontend no
+  // ejecuta ningún cálculo de física ni de modelo, solo suma lo ya predicho.
+  const forecastDates = useMemo(
+    () => (weather?.forecast ?? []).map((d) => d.date),
+    [weather],
+  );
+
+  useEffect(() => {
+    if (mode !== 'prediccion' || forecastDates.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      setPredLoading(true);
+      setPredError(null);
+      try {
+        const startIso = `${forecastDates[0]}T00:00:00`;
+        const endIso = `${forecastDates[forecastDates.length - 1]}T23:00:00`;
+        const data = await executeQuery<{ mlPredictDateRange: MlPredictionRow[] }>(
+          ML_PREDICT_DATE_RANGE_QUERY,
+          { startDate: startIso, endDate: endIso },
+          'network-only',
+        );
+        if (cancelled) return;
+        const byDay = new Map<string, number>();
+        for (const row of data?.mlPredictDateRange ?? []) {
+          const day = row.datetime.slice(0, 10);
+          byDay.set(day, (byDay.get(day) ?? 0) + row.productionKw);
+        }
+        setMlDaily(byDay);
+      } catch (err) {
+        if (cancelled) return;
+        setPredError(err instanceof Error ? err.message : 'No se pudo obtener la predicción del modelo.');
+        setMlDaily(new Map());
+      } finally {
+        if (!cancelled) setPredLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, forecastDates]);
 
   const handleExportCsv = () => {
     if (histView === 'daily' && summaries.length > 0) exportSummariesCsv(summaries, 'GemeloDigital');
@@ -188,17 +353,27 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
 
   const handleExportPdf = async () => {
     setExporting(true);
+    setError(null);
     try {
       const now = new Date();
       const meta = {
         title: histView === 'daily' ? 'Reporte de resumen diario' : 'Reporte de lecturas horarias',
         systemName: 'Gemelo Digital Fotovoltaico',
         location: 'La Habana, Cuba',
-        period: `Últimos ${days} días`,
+        period:
+          histSource === 'reciente'
+            ? `Últimos ${days} días`
+            : `${days} días hasta ${endDate}`,
         generatedAt: now.toLocaleString('es-CU'),
       };
-      if (histView === 'daily' && summaries.length > 0) await exportSummariesPdf(summaries, meta);
-      else if (histView === 'hourly' && readings.length > 0) await exportReadingsPdf(readings, meta);
+      if (histView === 'daily' && summaries.length > 0) {
+        await exportSummariesPdf(summaries, meta);
+      } else if (histView === 'hourly' && readings.length > 0) {
+        await exportReadingsPdf(readings, meta);
+      }
+    } catch (err) {
+      // Antes esto fallaba en silencio (try/finally sin catch); ahora se avisa.
+      setError(err instanceof Error ? `No se pudo generar el PDF: ${err.message}` : 'No se pudo generar el PDF.');
     } finally {
       setExporting(false);
     }
@@ -233,12 +408,19 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
 
   const prediction = useMemo(() => {
     const forecast = weather?.forecast ?? [];
+    const usesMl = mlDaily.size > 0;
 
-    const chart = forecast.map((d) => ({
-      label: d.dayOfWeek ? d.dayOfWeek.slice(0, 3) : format(new Date(d.date), 'EEE', { locale: es }),
-      Producción: Number(Math.max(d.predictedProduction || 0, 0).toFixed(1)),
-      Consumo: typicalConsumption != null ? Number(typicalConsumption.toFixed(1)) : 0,
-    }));
+    const chart = forecast.map((d) => {
+      // Producción del modelo ML del backend (kWh/día). Si no llegó el dato para
+      // ese día concreto, se respalda con el valor del pronóstico meteorológico.
+      const mlKwh = mlDaily.get(d.date);
+      const produccion = mlKwh != null ? mlKwh : Math.max(d.predictedProduction || 0, 0);
+      return {
+        label: d.dayOfWeek ? d.dayOfWeek.slice(0, 3) : format(new Date(d.date), 'EEE', { locale: es }),
+        Producción: Number(Math.max(produccion, 0).toFixed(1)),
+        Consumo: typicalConsumption != null ? Number(typicalConsumption.toFixed(1)) : 0,
+      };
+    });
 
     const totalProd = chart.reduce((s, d) => s + d.Producción, 0);
     const avgDaily = chart.length > 0 ? totalProd / chart.length : 0;
@@ -256,8 +438,9 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
       coverage,
       chart,
       hasConsumption: typicalConsumption != null,
+      source: (usesMl ? 'ml' : 'formula') as 'ml' | 'formula',
     };
-  }, [weather, typicalConsumption]);
+  }, [weather, typicalConsumption, mlDaily]);
 
   // ──────────────────────────────────────────────────────────────────────────
 
@@ -307,6 +490,11 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
         <HistoricalView
           histView={histView}
           setHistView={setHistView}
+          histSource={histSource}
+          setHistSource={setHistSource}
+          endDate={endDate}
+          setEndDate={setEndDate}
+          maxDate={todayStr()}
           days={days}
           setDays={setDays}
           loading={loading}
@@ -318,12 +506,14 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
           maxProductionKw={maxProductionKw}
           dailyChartData={dailyChartData}
           hourlyChartData={hourlyChartData}
+          monthly={monthly}
+          monthlyLoading={monthlyLoading}
           onRefresh={fetchData}
           onExportCsv={handleExportCsv}
           onExportPdf={handleExportPdf}
         />
       ) : (
-        <PredictionView prediction={prediction} />
+        <PredictionView prediction={prediction} loading={predLoading} error={predError} />
       )}
     </section>
   );
@@ -334,6 +524,11 @@ export default function EstadisticasPanel({ weather, config }: EstadisticasPanel
 function HistoricalView({
   histView,
   setHistView,
+  histSource,
+  setHistSource,
+  endDate,
+  setEndDate,
+  maxDate,
   days,
   setDays,
   loading,
@@ -345,12 +540,19 @@ function HistoricalView({
   maxProductionKw,
   dailyChartData,
   hourlyChartData,
+  monthly,
+  monthlyLoading,
   onRefresh,
   onExportCsv,
   onExportPdf,
 }: {
   histView: HistView;
   setHistView: (v: HistView) => void;
+  histSource: 'reciente' | 'historico';
+  setHistSource: (v: 'reciente' | 'historico') => void;
+  endDate: string;
+  setEndDate: (v: string) => void;
+  maxDate: string;
   days: number;
   setDays: (d: number) => void;
   loading: boolean;
@@ -362,6 +564,8 @@ function HistoricalView({
   maxProductionKw: number;
   dailyChartData: Array<{ fecha: string; Producción: number }>;
   hourlyChartData: Array<{ time: string; Producción: number }>;
+  monthly: MonthlyProduction[];
+  monthlyLoading: boolean;
   onRefresh: () => void;
   onExportCsv: () => void;
   onExportPdf: () => void;
@@ -376,6 +580,36 @@ function HistoricalView({
           Serie temporal de producción solar
         </div>
 
+        {/* Origen: reciente (hasta hoy) vs histórico (período pasado) */}
+        <div className="flex rounded-xl border border-slate-200 bg-slate-100 p-1">
+          {(['reciente', 'historico'] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setHistSource(s)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                histSource === s ? 'bg-emerald-600 text-white shadow' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              {s === 'reciente' ? 'Reciente' : 'Histórico'}
+            </button>
+          ))}
+        </div>
+
+        {/* Fecha final: solo en modo histórico (en reciente siempre es hoy) */}
+        {histSource === 'historico' && (
+          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+            <CalendarIcon className="h-4 w-4 text-slate-400" />
+            <input
+              type="date"
+              value={endDate}
+              max={maxDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="cursor-pointer bg-transparent text-sm text-slate-700 outline-none"
+              title="Fecha final del período histórico"
+            />
+          </div>
+        )}
+
         <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
           <CalendarIcon className="h-4 w-4 text-slate-400" />
           <select
@@ -383,9 +617,9 @@ function HistoricalView({
             onChange={(e) => setDays(Number(e.target.value))}
             className="cursor-pointer bg-transparent text-sm text-slate-700 outline-none"
           >
-            <option value={7}>Últimos 7 días</option>
-            <option value={14}>Últimos 14 días</option>
-            <option value={30}>Últimos 30 días</option>
+            <option value={7}>7 días</option>
+            <option value={14}>14 días</option>
+            <option value={30}>30 días</option>
           </select>
         </div>
 
@@ -451,9 +685,10 @@ function HistoricalView({
       {!loading && !error && noData && (
         <div className="rounded-2xl border border-slate-200 bg-slate-50 py-16 text-center">
           <ChartBarIcon className="mx-auto mb-4 h-12 w-12 text-slate-300" />
-          <p className="font-medium text-slate-600">Sin datos históricos</p>
+          <p className="font-medium text-slate-600">Sin datos para el período</p>
           <p className="mx-auto mt-1 mb-4 max-w-md text-sm text-slate-500">
-            El sistema aún no ha acumulado lecturas para el período seleccionado.
+            El modelo no devolvió producción para el rango seleccionado. Prueba otra fecha o
+            comprueba la conexión con Open-Meteo.
           </p>
         </div>
       )}
@@ -504,10 +739,163 @@ function HistoricalView({
           </ResponsiveContainer>
 
           <p className="mt-4 text-center text-xs text-slate-500">
-            Los datos se almacenan automáticamente cada 5 minutos en MongoDB (colección{' '}
-            <code className="rounded bg-slate-100 px-1 text-slate-700">lecturas_historicas</code>)
+            Serie reconstruida por el modelo de producción del backend a partir del clima horario de
+            Open-Meteo del período ({histSource === 'reciente' ? 'pronóstico reciente' : 'archivo histórico ERA5'}).
           </p>
         </div>
+      )}
+
+      {/* Pastel anual: producción por mes (histórico pasado + predicción futura) */}
+      <MonthlyPie monthly={monthly} loading={monthlyLoading} />
+    </div>
+  );
+}
+
+// ─── Monthly pie (annual production by month) ─────────────────────────────────
+
+// Etiqueta dentro del gajo: nombre del mes + kWh, en blanco con sombra suave para
+// que se lea sobre cualquier color. Solo se dibujan los kWh si el gajo es grande.
+// recharts tipa el render de label de forma laxa (PieLabelRenderProps), así que
+// recibimos `any` y desestructuramos los campos de geometría que sí llegan.
+function renderMonthLabel(props: any) {
+  const { cx, cy, midAngle, innerRadius, outerRadius, percent } = props;
+  const payload = props.payload as MonthlyProduction;
+  const RAD = Math.PI / 180;
+  const r = innerRadius + (outerRadius - innerRadius) * 0.5;
+  const x = cx + r * Math.cos(-midAngle * RAD);
+  const y = cy + r * Math.sin(-midAngle * RAD);
+  const shadow = { textShadow: '0 1px 3px rgba(15,23,42,0.55)' } as const;
+  return (
+    <text x={x} y={y} textAnchor="middle" dominantBaseline="central" pointerEvents="none">
+      <tspan x={x} dy={percent > 0.06 ? '-0.35em' : '0'} fill="#fff" fontSize={13} fontWeight={700} style={shadow}>
+        {payload.monthName}
+      </tspan>
+      {percent > 0.06 && (
+        <tspan x={x} dy="1.25em" fill="#ffffff" fontSize={10} fontWeight={500} opacity={0.95} style={shadow}>
+          {Math.round(payload.productionKwh)} kWh
+        </tspan>
+      )}
+    </text>
+  );
+}
+
+function MonthlyPie({ monthly, loading }: { monthly: MonthlyProduction[]; loading: boolean }) {
+  const data = monthly.filter((m) => m.productionKwh > 0);
+  const total = monthly.reduce((s, m) => s + m.productionKwh, 0);
+  const best = data.reduce<MonthlyProduction | null>(
+    (top, m) => (!top || m.productionKwh > top.productionKwh ? m : top),
+    null,
+  );
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50/80 p-6 shadow-sm">
+      <div className="mb-1 flex items-center gap-2">
+        <CalendarDaysIcon className="h-5 w-5 text-emerald-500" />
+        <h3 className="text-sm font-semibold text-slate-700">Producción por mes del año</h3>
+        {loading && <ArrowPathIcon className="h-4 w-4 animate-spin text-slate-400" />}
+      </div>
+      <p className="mb-2 text-xs text-slate-500">Histórico de lo transcurrido + estimación de lo que falta</p>
+
+      {data.length === 0 ? (
+        <div className="py-16 text-center text-sm text-slate-500">
+          {loading ? 'Calculando el balance anual…' : 'Sin datos anuales disponibles.'}
+        </div>
+      ) : (
+        <>
+          <div className="relative">
+            <ResponsiveContainer width="100%" height={380}>
+              <PieChart>
+                <defs>
+                  <filter id="pieShadow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#0f172a" floodOpacity="0.14" />
+                  </filter>
+                </defs>
+
+                {/* Anillo exterior fino: origen del dato (histórico/mixto/predicción) */}
+                <Pie
+                  data={data}
+                  dataKey="productionKwh"
+                  nameKey="monthName"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={138}
+                  outerRadius={150}
+                  paddingAngle={1}
+                  stroke="none"
+                  isAnimationActive={false}
+                >
+                  {data.map((m) => (
+                    <Cell key={`ring-${m.month}`} fill={MONTHLY_COLORS[m.source]} />
+                  ))}
+                </Pie>
+
+                {/* Donut principal: un color por mes, con el mes y los kWh dentro */}
+                <Pie
+                  data={data}
+                  dataKey="productionKwh"
+                  nameKey="monthName"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={78}
+                  outerRadius={130}
+                  paddingAngle={1.5}
+                  cornerRadius={6}
+                  stroke="#fff"
+                  strokeWidth={2}
+                  labelLine={false}
+                  label={renderMonthLabel}
+                  filter="url(#pieShadow)"
+                  animationDuration={700}
+                >
+                  {data.map((m) => (
+                    <Cell key={`slice-${m.month}`} fill={MONTH_COLORS[m.month - 1]} />
+                  ))}
+                </Pie>
+
+                <Tooltip
+                  formatter={(value: number, _name, item: { payload?: MonthlyProduction }) => [
+                    `${Number(value).toFixed(1)} kWh`,
+                    item?.payload ? MONTHLY_SOURCE_LABEL[item.payload.source] : '',
+                  ]}
+                  contentStyle={{
+                    borderRadius: 12,
+                    border: '1px solid #e2e8f0',
+                    boxShadow: '0 8px 24px rgba(15,23,42,0.12)',
+                    fontSize: 12,
+                  }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+
+            {/* Centro del donut: total del año */}
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-[11px] uppercase tracking-wider text-slate-400">Total año</span>
+              <span className="text-2xl font-extrabold text-slate-800">{formatEnergy(total)}</span>
+              {best && (
+                <span className="mt-0.5 text-[11px] text-slate-500">
+                  Mejor mes · {best.monthName}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Leyenda del anillo de origen */}
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-slate-600">
+            <span className="text-slate-400">Anillo exterior:</span>
+            {(['historico', 'mixto', 'prediccion'] as MonthlySource[]).map((s) => (
+              <span key={s} className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full ring-2 ring-white" style={{ background: MONTHLY_COLORS[s] }} />
+                {MONTHLY_SOURCE_LABEL[s]}
+              </span>
+            ))}
+          </div>
+
+          <p className="mt-3 text-xs leading-relaxed text-slate-500">
+            Cada gajo es un mes. Los ya transcurridos usan el clima real de Open-Meteo; los futuros se
+            estiman con la climatología del mismo mes del año anterior (no hay pronóstico a meses
+            vista). El mes en curso combina ambos.
+          </p>
+        </>
       )}
     </div>
   );
@@ -517,6 +905,8 @@ function HistoricalView({
 
 function PredictionView({
   prediction,
+  loading = false,
+  error = null,
 }: {
   prediction: {
     totalProd: number;
@@ -526,7 +916,10 @@ function PredictionView({
     coverage: number | null;
     chart: Array<{ label: string; Producción: number; Consumo: number }>;
     hasConsumption: boolean;
+    source: 'ml' | 'formula';
   };
+  loading?: boolean;
+  error?: string | null;
 }) {
   // Sin pronóstico no inventamos nada: estado vacío explícito.
   if (prediction.days === 0) {
@@ -577,6 +970,7 @@ function PredictionView({
         <div className="mb-4 flex items-center gap-2">
           <CalendarDaysIcon className="h-5 w-5 text-emerald-500" />
           <h3 className="text-sm font-semibold text-slate-700">Producción diaria estimada (kWh)</h3>
+          {loading && <ArrowPathIcon className="h-4 w-4 animate-spin text-slate-400" />}
         </div>
         <ResponsiveContainer width="100%" height={320}>
           <ComposedChart data={prediction.chart} barCategoryGap="30%">
@@ -612,9 +1006,24 @@ function PredictionView({
         </ResponsiveContainer>
 
         <p className="mt-4 text-xs leading-relaxed text-slate-500">
-          Estimación basada en el pronóstico de irradiancia de Open-Meteo ({prediction.days} días),
-          convertido a energía mediante horas-sol pico y un performance ratio de 0,75. No se proyecta
-          más allá de la ventana del pronóstico por no existir datos meteorológicos fiables.
+          {prediction.source === 'ml' ? (
+            <>
+              Producción estimada por el modelo de Machine Learning del backend (Random Forest
+              entrenado para La Habana) — el mismo que alimenta el gráfico de producción vs consumo
+              del panel principal. Combina el pronóstico horario de Open-Meteo ({prediction.days} días)
+              con la sombra y la orientación de tu instalación, y totaliza las horas de cada día a kWh.
+              No se proyecta más allá de la ventana del pronóstico por no existir datos meteorológicos
+              fiables.
+            </>
+          ) : (
+            <>
+              {error
+                ? `No se pudo contactar el modelo de Machine Learning del backend (${error}); `
+                : 'Modelo de Machine Learning del backend no disponible; '}
+              se muestra la estimación física de respaldo a partir del pronóstico de irradiancia de
+              Open-Meteo ({prediction.days} días).
+            </>
+          )}
           {prediction.hasConsumption
             ? ' La línea de consumo típico es el promedio diario del período cargado en la vista Histórico.'
             : ' Carga la vista Histórico para comparar contra el consumo típico.'}

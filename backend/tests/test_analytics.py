@@ -45,10 +45,11 @@ class TestCalculateSystemMetrics:
         result = calculate_system_metrics(make_current(20, 15), history)
         assert result["dailyConsumption"] == 35.0
 
-    def test_co2_evitado_es_mitad_de_produccion_diaria(self):
+    def test_co2_evitado_usa_el_factor_de_red(self):
+        from app.services.analytics import grid_co2_factor
         history = make_history((100, 80))
         result = calculate_system_metrics(make_current(0, 0, 0), history)
-        assert result["co2Avoided"] == 50.0
+        assert result["co2Avoided"] == round(100 * grid_co2_factor(), 2)
 
     def test_co2_es_cero_sin_historial(self):
         result = calculate_system_metrics(make_current(20, 15), [])

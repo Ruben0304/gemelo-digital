@@ -4,7 +4,7 @@ Pruebas unitarias para funciones puras de app/services/prediction_service.py
 Cubre:
 - predict_production: cálculo de producción solar por hora
 - _get_hour_efficiency_factor: factor de eficiencia según hora del día
-- _calculate_prediction_confidence: confianza de predicción
+- _model_confidence_pct: confianza = R² real del modelo
 - _estimate_hourly_temperature: temperatura estimada por hora
 - _predict_consumption: consumo estimado por hora
 """
@@ -13,7 +13,7 @@ import pytest
 from app.services.prediction_service import (
     predict_production,
     _get_hour_efficiency_factor,
-    _calculate_prediction_confidence,
+    _model_confidence_pct,
     _estimate_hourly_temperature,
     _predict_consumption,
 )
@@ -106,33 +106,36 @@ class TestPredictProduction:
 
 
 # ─────────────────────────────────────────────────────────────────
-# _calculate_prediction_confidence
+# _model_confidence_pct  (confianza = R² real del modelo, no una fórmula)
 # ─────────────────────────────────────────────────────────────────
 
-class TestPredictionConfidence:
+class TestModelConfidence:
 
-    def test_confianza_maxima_en_hora_actual_cielo_despejado(self):
-        conf = _calculate_prediction_confidence(0, 0)
-        assert conf == 95  # 95 - 0*2 - 0/5 = 95
+    def test_confianza_es_el_r2_del_modelo(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.services.prediction_service.ml_model_service.get_test_r2",
+            lambda: 0.789,
+        )
+        assert _model_confidence_pct() == 79  # round(0.789 * 100)
 
-    def test_confianza_decrece_con_horizonte_temporal(self):
-        conf_0h = _calculate_prediction_confidence(0, 0)
-        conf_12h = _calculate_prediction_confidence(12, 0)
-        assert conf_12h < conf_0h
+    def test_cero_si_no_hay_modelo(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.services.prediction_service.ml_model_service.get_test_r2",
+            lambda: None,
+        )
+        assert _model_confidence_pct() == 0
 
-    def test_nubosidad_reduce_confianza(self):
-        clear = _calculate_prediction_confidence(0, 0)
-        cloudy = _calculate_prediction_confidence(0, 100)
-        assert cloudy < clear
-
-    def test_confianza_nunca_baja_de_50(self):
-        # 40h adelante con 100% nubosidad → debería ser mínimo 50
-        conf = _calculate_prediction_confidence(40, 100)
-        assert conf >= 50
-
-    def test_confianza_nunca_supera_95(self):
-        conf = _calculate_prediction_confidence(0, 0)
-        assert conf <= 95
+    def test_se_acota_entre_0_y_100(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.services.prediction_service.ml_model_service.get_test_r2",
+            lambda: 1.5,
+        )
+        assert _model_confidence_pct() == 100
+        monkeypatch.setattr(
+            "app.services.prediction_service.ml_model_service.get_test_r2",
+            lambda: -0.3,
+        )
+        assert _model_confidence_pct() == 0
 
 
 # ─────────────────────────────────────────────────────────────────

@@ -35,9 +35,9 @@ describe('calculateSystemMetrics', () => {
     expect(result.dailyConsumption).toBe(35)
   })
 
-  it('calcula CO₂ evitado a razón de 0.5 kg/kWh', () => {
+  it('calcula CO₂ evitado con el factor de red (1.0 kg/kWh)', () => {
     const result = calculateSystemMetrics(sd(0, 0, 0), [sd(100, 80)])
-    expect(result.co2Avoided).toBe(50)
+    expect(result.co2Avoided).toBe(100)
   })
 
   it('retorna CO₂ = 0 sin historial', () => {

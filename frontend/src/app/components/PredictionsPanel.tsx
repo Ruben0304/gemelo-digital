@@ -2,18 +2,15 @@
 
 import { useState, useRef, useEffect } from 'react';
 import {
-  Alert,
   Prediction,
   WeatherData,
   BatteryStatus,
   SystemConfig,
 } from '@/types';
-import { Info, BrainCircuit, LineChart, ChevronDown, ChevronUp, AlertTriangle, AlertOctagon, Lightbulb } from 'lucide-react';
+import { Info, BrainCircuit, LineChart, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface PredictionsPanelProps {
   predictions: Prediction[];
-  alerts: Alert[];
-  recommendations: string[];
   weather?: WeatherData | null;
   batteryProjection?: BatteryStatus;
   config?: SystemConfig;
@@ -92,16 +89,8 @@ function formatTime(d: Date) {
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
-const ALERT_STYLES = {
-  critical: { box: 'border-red-200 bg-red-50', text: 'text-red-700', icon: AlertOctagon },
-  warning: { box: 'border-amber-200 bg-amber-50', text: 'text-amber-700', icon: AlertTriangle },
-  info: { box: 'border-sky-200 bg-sky-50', text: 'text-sky-700', icon: Info },
-} as const;
-
 export default function PredictionsPanel({
   predictions,
-  alerts = [],
-  recommendations = [],
   solarModelR2,
 }: PredictionsPanelProps) {
   const [methodOpen, setMethodOpen] = useState(false);
@@ -133,8 +122,8 @@ export default function PredictionsPanel({
                     tooltip={
                       <>
                         <span className="font-semibold block mb-1">Modelo Random Forest</span>
-                        Entrenado con datos históricos de Open-Meteo.{'\n'}
-                        Características: temperatura, humedad, viento, nubosidad, radiación, hora (sin/cos).
+                        Entrenado con datos históricos de PVGIS + Open-Meteo (La Habana, 2010–2015).{'\n'}
+                        La confianza mostrada ES el R² del modelo en el conjunto de test (proporción de varianza explicada), no una estimación arbitraria.
                         {solarModelR2 != null && (
                           <>{'\n'}R² en test: {(solarModelR2 * 100).toFixed(1)}% — el {(100 - solarModelR2 * 100).toFixed(1)}% restante es variabilidad no capturada.</>
                         )}
@@ -165,13 +154,13 @@ export default function PredictionsPanel({
               <p className="font-semibold text-gray-800 flex items-center gap-1.5">
                 <BrainCircuit className="w-3.5 h-3.5 text-amber-500" /> Producción solar — Random Forest
               </p>
-              <p>Fuente de datos: API Open-Meteo (pronóstico horario).</p>
-              <p>9 características: temperatura, humedad, viento, nubosidad, radiación, hora (sin/cos), día del año.</p>
+              <p>Fuente de datos: API Open-Meteo (pronóstico horario) + geometría solar (pvlib).</p>
+              <p>14 características: radiación, GHI de cielo despejado, índice de claridad, elevación solar, irradiancia efectiva, nubosidad, temperatura, humedad, viento, factor térmico, hora y mes (sin/cos).</p>
               {solarModelR2 != null && (
                 <p>R² en conjunto de test: <span className="font-mono font-semibold">{(solarModelR2 * 100).toFixed(1)}%</span>.</p>
               )}
-              <p>Confianza reducida cuando la nubosidad prevista es alta (mayor incertidumbre en radiación).</p>
-              <p className="text-gray-400">Archivo: <span className="font-mono">solar_production_random_forest.pkl</span></p>
+              <p>La confianza mostrada es ese R² (varianza explicada por el modelo), no una fórmula heurística.</p>
+              <p className="text-gray-400">Archivo: <span className="font-mono">solar_production_havana_v1.pkl</span></p>
             </div>
             <div className="space-y-1.5">
               <p className="font-semibold text-gray-800 flex items-center gap-1.5">
@@ -182,47 +171,6 @@ export default function PredictionsPanel({
           </div>
         )}
       </div>
-
-      {/* ── Alertas del sistema ──────────────────────────────────────────── */}
-      {alerts.length > 0 && (
-        <div className="space-y-2">
-          {alerts.map((alert) => {
-            const style = ALERT_STYLES[alert.type] ?? ALERT_STYLES.info;
-            const Icon = style.icon;
-            return (
-              <div
-                key={alert.id}
-                role={alert.type === 'critical' ? 'alert' : 'status'}
-                className={`flex items-start gap-3 rounded-xl border px-4 py-3 ${style.box}`}
-              >
-                <Icon className={`w-5 h-5 shrink-0 mt-0.5 ${style.text}`} />
-                <div>
-                  <p className={`text-sm font-semibold ${style.text}`}>{alert.title}</p>
-                  <p className="text-xs text-gray-600 mt-0.5">{alert.message}</p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ── Recomendaciones ──────────────────────────────────────────────── */}
-      {recommendations.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-          <div className="flex items-center gap-2 mb-3">
-            <Lightbulb className="w-4 h-4 text-amber-500" />
-            <h3 className="text-sm font-semibold text-gray-900">Recomendaciones operativas</h3>
-          </div>
-          <ul className="space-y-2">
-            {recommendations.map((rec, idx) => (
-              <li key={idx} className="flex items-start gap-2 text-sm text-gray-600">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
-                {rec}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
     </div>
   );

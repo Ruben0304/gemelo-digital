@@ -28,8 +28,9 @@ import {
   ApplianceConfig,
   EnergyFlow,
 } from '@/types';
-import { ArrowPathIcon, ExclamationTriangleIcon, WifiIcon } from '@heroicons/react/24/outline';
+import { ArrowPathIcon, ExclamationTriangleIcon, WifiIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
 import { executeQuery } from '@/lib/graphql-client';
+import { getSoilingThreshold } from '@/lib/soiling';
 import { DEFAULT_SYSTEM_CONFIG } from '@/lib/systemDefaults';
 import { useRouter } from 'next/navigation';
 
@@ -158,6 +159,7 @@ const DASHBOARD_QUERY = `
       locationName
       lastUpdated
       description
+      weatherCode
       isMock
       forecast {
         date
@@ -384,6 +386,19 @@ const SOLAR_MODEL_INFO_QUERY = `
     mlModelInfo {
       loaded
       testR2
+      testRmse
+    }
+  }
+`;
+
+const PANEL_CLEANLINESS_QUERY = `
+  query LatestPanelCleanliness {
+    latestPanelCleanliness {
+      timestamp
+      clasificacion
+      porcentajeLimpio
+      porcentajeSucio
+      source
     }
   }
 `;
@@ -586,6 +601,19 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
   const [mlPredictions, setMlPredictions] = useState<SolarData[]>([]);
   const [mlLoading, setMlLoading] = useState(false);
   const [solarModelR2, setSolarModelR2] = useState<number | null>(null);
+  const [solarModelRmse, setSolarModelRmse] = useState<number | null>(null);
+  const [panelCleanliness, setPanelCleanliness] = useState<{
+    timestamp: string;
+    clasificacion: string;
+    porcentajeLimpio: number;
+    porcentajeSucio: number;
+    source: string;
+  } | null>(null);
+  // Umbral de suciedad configurado en el modal de "comprobar limpieza" (lib/soiling).
+  const [soilingThreshold, setSoilingThreshold] = useState<number>(50);
+  useEffect(() => {
+    setSoilingThreshold(getSoilingThreshold());
+  }, []);
   const [batteryConfigs, setBatteryConfigs] = useState<BatteryConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -796,11 +824,29 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
 
       // Load solar model info (R²) once — no es crítico, corre en paralelo.
       try {
-        type ModelInfoResult = { mlModelInfo: { loaded: boolean; testR2?: number | null } };
+        type ModelInfoResult = { mlModelInfo: { loaded: boolean; testR2?: number | null; testRmse?: number | null } };
         const modelInfo = await executeQuery<ModelInfoResult>(SOLAR_MODEL_INFO_QUERY);
-        if (modelInfo.mlModelInfo?.loaded && modelInfo.mlModelInfo.testR2 != null) {
-          setSolarModelR2(modelInfo.mlModelInfo.testR2);
+        if (modelInfo.mlModelInfo?.loaded) {
+          if (modelInfo.mlModelInfo.testR2 != null) setSolarModelR2(modelInfo.mlModelInfo.testR2);
+          if (modelInfo.mlModelInfo.testRmse != null) setSolarModelRmse(modelInfo.mlModelInfo.testRmse);
         }
+      } catch {
+        // non-critical, skip silently
+      }
+
+      // Última lectura de limpieza de paneles — no crítico, corre aparte.
+      try {
+        type CleanlinessResult = {
+          latestPanelCleanliness: {
+            timestamp: string;
+            clasificacion: string;
+            porcentajeLimpio: number;
+            porcentajeSucio: number;
+            source: string;
+          } | null;
+        };
+        const cleanliness = await executeQuery<CleanlinessResult>(PANEL_CLEANLINESS_QUERY);
+        setPanelCleanliness(cleanliness.latestPanelCleanliness ?? null);
       } catch {
         // non-critical, skip silently
       }
@@ -1028,6 +1074,19 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
         </div>
       )}
 
+      {/* Alerta de suciedad: paneles por encima del umbral configurado de suciedad */}
+      {panelCleanliness && panelCleanliness.porcentajeSucio >= soilingThreshold && (
+        <div className="bg-red-600 px-4 py-2.5">
+          <div className="max-w-7xl mx-auto flex items-center gap-2 text-white text-sm font-semibold">
+            <ExclamationTriangleIcon className="w-5 h-5 shrink-0" />
+            <span>
+              Paneles sucios: última lectura {Math.round(panelCleanliness.porcentajeLimpio)}% limpio.
+              Se recomienda limpiar los paneles para no perder producción.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Main Content - Simplificado */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-4 sm:pt-6 pb-32">
         {activeSection === 'overview' && (
@@ -1062,6 +1121,11 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                   useMLPredictions={mlPredictions.length > 0}
                   loading={mlLoading}
                   onDayChange={fetchMLPredictionsForDay}
+                  productionErrorKw={
+                    solarModelRmse != null && solarData?.config?.solar?.capacityKw
+                      ? solarModelRmse * solarData.config.solar.capacityKw
+                      : undefined
+                  }
                 />
               </div>
               <div>
@@ -1072,14 +1136,28 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
             <div>
               <PredictionsPanel
                 predictions={predictionsData.predictions}
-                alerts={predictionsData.alerts}
-                recommendations={predictionsData.recommendations}
                 weather={weatherData}
                 batteryProjection={predictionsData.battery}
                 config={solarData.config}
                 solarModelR2={solarModelR2}
               />
             </div>
+
+            {/* Lectura de limpieza de paneles — estado correcto (suciedad bajo el umbral).
+                Si lo supera, se muestra como alerta roja arriba en su lugar. */}
+            {panelCleanliness && panelCleanliness.porcentajeSucio < soilingThreshold && (
+              <div className="mt-6 sm:mt-8 flex items-center gap-3 rounded-2xl border border-green-200 bg-green-50 px-5 py-4">
+                <CheckCircleIcon className="h-6 w-6 shrink-0 text-green-600" />
+                <div className="text-sm text-green-800">
+                  <p className="font-semibold">
+                    Lectura de paneles: {Math.round(panelCleanliness.porcentajeLimpio)}% limpio
+                  </p>
+                  <p className="text-green-700">
+                    Los paneles están en buen estado de limpieza. La producción no debería verse afectada.
+                  </p>
+                </div>
+              </div>
+            )}
           </>
         )}
 

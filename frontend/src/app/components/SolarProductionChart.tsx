@@ -5,22 +5,30 @@ import { SolarData } from '@/types';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart } from 'recharts';
 import { format, addDays, startOfDay, isSameDay } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { ChevronLeftIcon, ChevronRightIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
+import { ChevronLeftIcon, ChevronRightIcon, ArrowPathIcon, ChartBarSquareIcon } from '@heroicons/react/24/outline';
 
 interface SolarProductionChartProps {
   data: SolarData[];
   useMLPredictions?: boolean;
   loading?: boolean;
   onDayChange?: (dayOffset: number) => void;
+  /** Error del modelo en kW (±RMSE escalado a la capacidad). Si se da, habilita
+   *  el botón opcional para mostrar el intervalo de error sobre la producción. */
+  productionErrorKw?: number;
 }
 
 export default function SolarProductionChart({
   data,
   useMLPredictions = false,
   loading = false,
-  onDayChange
+  onDayChange,
+  productionErrorKw,
 }: SolarProductionChartProps) {
   const [selectedDayOffset, setSelectedDayOffset] = useState(0); // 0 = today, 1 = tomorrow
+  const [showError, setShowError] = useState(false); // banda de error opcional
+
+  // Error del modelo (±RMSE) en kW. Solo aplica a la predicción ML.
+  const errorKw = useMLPredictions && productionErrorKw && productionErrorKw > 0 ? productionErrorKw : 0;
 
   // Handle day change
   const handleDayChange = (newOffset: number) => {
@@ -40,13 +48,20 @@ export default function SolarProductionChart({
   });
 
   // Transform data for chart
-  const chartData = filteredData.map((item) => ({
-    time: format(new Date(item.timestamp), 'HH:mm', { locale: es }),
-    hour: new Date(item.timestamp).getHours(),
-    producción: Number(item.production.toFixed(2)),
-    consumo: Number(item.consumption.toFixed(2)),
-    balance: Number((item.production - item.consumption).toFixed(2)),
-  }));
+  const chartData = filteredData.map((item) => {
+    const prod = Number(item.production.toFixed(2));
+    const low = Number(Math.max(0, prod - errorKw).toFixed(2));
+    const high = Number((prod + errorKw).toFixed(2));
+    return {
+      time: format(new Date(item.timestamp), 'HH:mm', { locale: es }),
+      hour: new Date(item.timestamp).getHours(),
+      producción: prod,
+      consumo: Number(item.consumption.toFixed(2)),
+      balance: Number((item.production - item.consumption).toFixed(2)),
+      // Banda de error [inferior, superior] para el área de incertidumbre.
+      errorBand: [low, high] as [number, number],
+    };
+  });
 
   // Custom tooltip
   const CustomTooltip = ({ active, payload }: any) => {
@@ -62,14 +77,23 @@ export default function SolarProductionChart({
             <div className="w-3 h-3 rounded-full bg-green-400" />
             <span className="text-xs text-gray-600">Producción:</span>
             <span className="text-sm font-bold text-green-500">
-              {payload[0]?.value} kW
+              {payload[0]?.payload.producción} kW
             </span>
           </div>
+          {showError && errorKw > 0 && (
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-green-200" />
+              <span className="text-xs text-gray-600">Intervalo (±RMSE):</span>
+              <span className="text-sm font-medium text-gray-700">
+                {payload[0]?.payload.errorBand?.[0]}–{payload[0]?.payload.errorBand?.[1]} kW
+              </span>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-blue-400" />
             <span className="text-xs text-gray-600">Consumo:</span>
             <span className="text-sm font-bold text-blue-500">
-              {payload[1]?.value} kW
+              {payload[0]?.payload.consumo} kW
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -136,6 +160,23 @@ export default function SolarProductionChart({
             ? '7:00 AM - 10:00 PM usando modelo Random Forest (Havana v1) entrenado con datos de La Habana (R²=0.79 en horas diurnas)'
             : '7:00 AM - 10:00 PM basadas en clima y especificaciones del sistema'}
         </p>
+
+        {/* Botón opcional: intervalo de error del modelo (±RMSE) */}
+        {errorKw > 0 && (
+          <button
+            onClick={() => setShowError((v) => !v)}
+            title="Muestra la banda de incertidumbre del modelo (±RMSE) sobre la producción"
+            className={`mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+              showError
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50'
+            }`}
+          >
+            <ChartBarSquareIcon className="w-4 h-4" />
+            {showError ? 'Ocultar intervalo de error' : 'Mostrar intervalo de error'}
+            <span className="text-gray-400 font-normal">(±{errorKw.toFixed(1)} kW)</span>
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -198,6 +239,22 @@ export default function SolarProductionChart({
               <span className="text-gray-600 text-sm font-medium">{value}</span>
             )}
           />
+          {showError && errorKw > 0 && (
+            <Area
+              type="monotone"
+              dataKey="errorBand"
+              name="Intervalo de error (±RMSE)"
+              stroke="#10b981"
+              strokeOpacity={0.35}
+              strokeWidth={1}
+              strokeDasharray="4 3"
+              fill="#10b981"
+              fillOpacity={0.14}
+              dot={false}
+              activeDot={false}
+              isAnimationActive={false}
+            />
+          )}
           <Area
             type="monotone"
             dataKey="producción"

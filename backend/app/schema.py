@@ -96,6 +96,7 @@ from app.services.lectura_service import (
     save_reading,
     seed_historical_data,
 )
+from app.services.panel_cleanliness_service import get_latest_cleanliness
 from app.services.medicion_service import (
     upload_batch as upload_appliance_batch,
     delete_batch as delete_appliance_batch,
@@ -457,6 +458,17 @@ class HistoricalReadingType:
 
 
 @strawberry.type
+class PanelCleanlinessType:
+    """Última lectura de limpieza de paneles (clasificador de imágenes)."""
+    id_: str = strawberry.field(name="_id")
+    timestamp: str
+    clasificacion: str
+    porcentajeLimpio: float
+    porcentajeSucio: float
+    source: str
+
+
+@strawberry.type
 class DailySummaryType:
     date: str
     totalProductionKwh: float
@@ -549,6 +561,21 @@ class MLModelInfoType:
     requires_scaling: Optional[bool]
     reference_capacity_kw: Optional[float]
     message: Optional[str]
+
+
+@strawberry.type
+class MonthlyProductionType:
+    """Producción de un mes del año, con su origen.
+
+    ``source`` indica de dónde sale la cifra:
+      * ``historico``   — meses ya pasados (clima real de Open-Meteo).
+      * ``prediccion``  — meses futuros (climatología: mismo mes del año anterior).
+      * ``mixto``       — mes en curso (parte real + parte estimada).
+    """
+    month: int          # 1..12
+    monthName: str
+    productionKwh: float
+    source: str
 
 
 @strawberry.type
@@ -1282,6 +1309,21 @@ class Query:
         ]
 
     @strawberry.field
+    def latest_panel_cleanliness(self) -> Optional[PanelCleanlinessType]:
+        """Última lectura de limpieza de paneles, o None si aún no hay ninguna."""
+        reading = get_latest_cleanliness()
+        if not reading:
+            return None
+        return PanelCleanlinessType(
+            id_=reading["_id"],
+            timestamp=reading["timestamp"],
+            clasificacion=reading["clasificacion"],
+            porcentajeLimpio=reading["porcentajeLimpio"],
+            porcentajeSucio=reading["porcentajeSucio"],
+            source=reading["source"],
+        )
+
+    @strawberry.field
     def daily_summaries(self, days: int = 30) -> List[DailySummaryType]:
         """Get daily aggregated production summaries for the last N days."""
         summaries = get_daily_summaries(days)
@@ -1321,6 +1363,105 @@ class Query:
             hasRealData=report["hasRealData"],
             appliances=appliances,
         )
+
+    @strawberry.field
+    async def monthly_production(self, year: Optional[int] = None) -> List[MonthlyProductionType]:
+        """
+        Producción por mes del año, reconstruida con el modelo de producción.
+
+        Mezcla, en un único pastel anual:
+          * meses ya pasados → clima REAL de Open-Meteo (Archive API / forecast);
+          * meses futuros    → climatología (mismo mes del año anterior);
+          * mes en curso      → parte real + parte estimada (``mixto``).
+
+        Reutiliza el mismo modelo ML que el resto de la pantalla; aquí solo se
+        orquestan los tramos y se totaliza por mes.
+        """
+        import asyncio
+        from datetime import date as _date, datetime as _dt, timedelta as _td, timezone as _tz
+
+        MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+                 "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+
+        config = get_system_config()
+        lat = config["location"]["lat"]
+        lon = config["location"]["lon"]
+        capacity_kw = _get_real_capacity_kw_from_config(config)
+
+        today = _date.today()
+        target_year = year or today.year
+
+        kwh = {m: 0.0 for m in range(1, 13)}
+        has_real = {m: False for m in range(1, 13)}
+        has_pred = {m: False for m in range(1, 13)}
+
+        async def _fetch_chunk(start: "_date", end: "_date", is_pred: bool):
+            """Predice un tramo y devuelve (preds, is_pred). NO muta el acumulador:
+            la fusión se hace tras el gather, así no hay carrera entre tramos."""
+            if start > end:
+                return ([], is_pred)
+            # Horas UTC-aware (no naïve): así el pipeline no intenta localizar a
+            # hora local y evitamos el hueco del cambio de horario de verano, que
+            # rompería pandas al cruzar marzo en un rango anual.
+            cur = _dt(start.year, start.month, start.day, tzinfo=_tz.utc)
+            stop = _dt(end.year, end.month, end.day, 23, tzinfo=_tz.utc)
+            datetimes = []
+            while cur <= stop:
+                datetimes.append(cur.isoformat())
+                cur += _td(hours=1)
+            preds = await predict_solar_production(datetimes, lat, lon)
+            preds = _scale_ml_predictions(preds, capacity_kw)
+            return (preds, is_pred)
+
+        # Cada tramo es una petición HTTP independiente a Open-Meteo (rama "fuera de
+        # ventana" del caché, sin estado compartido), así que se lanzan en paralelo
+        # con seguridad: el cuello de botella es la red, y el pastel baja de ~10 s a
+        # ~4 s. La inferencia del modelo sigue serializada (es síncrona, no awaita).
+        tasks = []
+        if target_year < today.year:
+            # Año completamente pasado → todo histórico real.
+            tasks.append(_fetch_chunk(_date(target_year, 1, 1), _date(target_year, 12, 31), False))
+        elif target_year > today.year:
+            # Año completamente futuro → climatología del último año conocido.
+            tasks.append(_fetch_chunk(_date(today.year - 1, 1, 1), _date(today.year - 1, 12, 31), True))
+        else:
+            # Año en curso. El tramo real se parte en dos para respetar el ruteo de
+            # Open-Meteo (Archive para lo viejo, /forecast para los últimos días).
+            archive_end = today - _td(days=6)
+            tasks.append(_fetch_chunk(_date(today.year, 1, 1), archive_end, False))          # real (archivo)
+            tasks.append(_fetch_chunk(max(_date(today.year, 1, 1), today - _td(days=5)), today, False))  # real (forecast)
+            # Lo que falta del año → mismas fechas del año anterior (climatología).
+            rem_start = today + _td(days=1)
+            if rem_start <= _date(today.year, 12, 31):
+                tasks.append(_fetch_chunk(rem_start.replace(year=today.year - 1),
+                                          _date(today.year - 1, 12, 31), True))
+
+        chunks = await asyncio.gather(*tasks)
+        # Fusión secuencial (sin concurrencia) → sin condiciones de carrera.
+        for preds, is_pred in chunks:
+            for p in preds:
+                m = _dt.fromisoformat(p["datetime"]).month
+                kwh[m] += p["production_kw"]
+                if is_pred:
+                    has_pred[m] = True
+                else:
+                    has_real[m] = True
+
+        result: List[MonthlyProductionType] = []
+        for m in range(1, 13):
+            if has_real[m] and has_pred[m]:
+                source = "mixto"
+            elif has_pred[m]:
+                source = "prediccion"
+            else:
+                source = "historico"
+            result.append(MonthlyProductionType(
+                month=m,
+                monthName=MESES[m - 1],
+                productionKwh=round(kwh[m], 1),
+                source=source,
+            ))
+        return result
 
     @strawberry.field
     def appliance_readings(

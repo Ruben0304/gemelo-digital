@@ -21,6 +21,13 @@ export interface ReportKPI {
   unit?: string;
 }
 
+// Imagen rasterizada del gráfico en pantalla (PNG) para incrustar en el PDF.
+export interface ChartImage {
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
 // ─── CSV Utilities ────────────────────────────────────────────────────────────
 
 function escapeCsv(val: unknown): string {
@@ -106,10 +113,35 @@ const COLOR = {
   border:     [203, 213, 225] as [number, number, number],  // slate-300
 };
 
-async function loadJsPdf() {
+// jspdf-autotable v5 expone una API FUNCIONAL: `autoTable(doc, opts)`. El antiguo
+// `doc.autoTable(opts)` ya no se registra de forma fiable con el import de efecto
+// secundario (y lanzaba silenciosamente), así que usamos la función directamente.
+async function loadPdf() {
   const { jsPDF } = await import('jspdf');
-  await import('jspdf-autotable');
-  return jsPDF;
+  const autoTable = (await import('jspdf-autotable')).default;
+  return { jsPDF, autoTable };
+}
+
+// Coloca una imagen ajustada a (maxW, maxH) conservando proporción y centrada
+// horizontalmente. Devuelve la Y inferior tras la imagen.
+function addFittedImage(
+  doc: any,
+  img: ChartImage,
+  x: number,
+  y: number,
+  maxW: number,
+  maxH: number,
+): number {
+  const aspect = img.width / img.height || 2;
+  let w = maxW;
+  let h = w / aspect;
+  if (h > maxH) {
+    h = maxH;
+    w = h * aspect;
+  }
+  const offsetX = x + (maxW - w) / 2;
+  doc.addImage(img.dataUrl, 'PNG', offsetX, y, w, h);
+  return y + h;
 }
 
 function drawPageHeader(doc: any, meta: ReportMeta) {
@@ -219,8 +251,9 @@ function drawSectionTitle(doc: any, title: string, y: number): number {
 export async function exportSummariesPdf(
   summaries: DailySummary[],
   meta: ReportMeta,
+  chart?: ChartImage,
 ) {
-  const JsPDF = await loadJsPdf();
+  const { jsPDF: JsPDF, autoTable } = await loadPdf();
   const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' }) as any;
 
   // ── Page 1: Cover + KPIs + chart bars ────────────────────────────────────
@@ -242,8 +275,14 @@ export async function exportSummariesPdf(
   y = drawKpiCards(doc, kpis, y);
   y += 2;
 
-  // Mini bar chart — production per day
-  if (summaries.length > 0) {
+  // Gráfico: si llega la imagen real de la pantalla, se incrusta; si no, se
+  // dibuja el mini gráfico de barras de respaldo.
+  if (chart) {
+    y = drawSectionTitle(doc, 'Producción solar diaria', y);
+    const W = doc.internal.pageSize.getWidth();
+    y = addFittedImage(doc, chart, 14, y, W - 28, 95);
+    y += 6;
+  } else if (summaries.length > 0) {
     y = drawSectionTitle(doc, 'Producción Solar Diaria', y);
     const chartH = 40;
     const chartW = doc.internal.pageSize.getWidth() - 28;
@@ -294,13 +333,10 @@ export async function exportSummariesPdf(
     y += chartH + 18;
   }
 
-  // ── Page 2: Data table ────────────────────────────────────────────────────
-  doc.addPage();
-  drawPageHeader(doc, meta);
-  y = 36;
-  y = drawSectionTitle(doc, 'Resumen Diario Detallado', y);
+  // ── Tabla de datos (debajo del gráfico; pagina sola si no cabe) ───────────
+  y = drawSectionTitle(doc, 'Resumen diario detallado', y);
 
-  (doc as any).autoTable({
+  autoTable(doc, {
     startY: y,
     head: [[
       'Fecha', 'Producción\n(kWh)', 'CO₂ evitado\n(kg)', 'Prod. máx\n(kW)', 'Lecturas',
@@ -326,10 +362,9 @@ export async function exportSummariesPdf(
       0: { halign: 'left', fontStyle: 'bold' },
       2: { textColor: COLOR.green },
     },
-    margin: { left: 14, right: 14 },
-    didDrawPage: (data: any) => {
-      drawPageHeader(doc, meta);
-    },
+    margin: { left: 14, right: 14, top: 32 },
+    // En cada página nueva que cree la tabla, repintar la cabecera superior.
+    didDrawPage: () => drawPageHeader(doc, meta),
   });
 
   // Finalize — add footers to all pages
@@ -345,8 +380,9 @@ export async function exportSummariesPdf(
 export async function exportReadingsPdf(
   readings: HistoricalReading[],
   meta: ReportMeta,
+  chart?: ChartImage,
 ) {
-  const JsPDF = await loadJsPdf();
+  const { jsPDF: JsPDF, autoTable } = await loadPdf();
   const doc = new JsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' }) as any;
 
   drawPageHeader(doc, meta);
@@ -375,9 +411,18 @@ export async function exportReadingsPdf(
 
   let y = 36;
   y = drawKpiCards(doc, kpis, y);
-  y = drawSectionTitle(doc, 'Lecturas Horarias del Sistema', y);
 
-  (doc as any).autoTable({
+  // Gráfico de la serie (si se capturó de la pantalla).
+  if (chart) {
+    y = drawSectionTitle(doc, 'Producción por hora', y);
+    const W = doc.internal.pageSize.getWidth();
+    y = addFittedImage(doc, chart, 14, y, W - 28, 70);
+    y += 6;
+  }
+
+  y = drawSectionTitle(doc, 'Lecturas horarias del sistema', y);
+
+  autoTable(doc, {
     startY: y,
     head: [['Timestamp', 'Producción (kW)']],
     body: readings.map(r => [
@@ -398,10 +443,8 @@ export async function exportReadingsPdf(
       0: { halign: 'left', fontStyle: 'bold', cellWidth: 38 },
       1: { textColor: COLOR.accent as unknown as string },
     },
-    margin: { left: 14, right: 14 },
-    didDrawPage: () => {
-      drawPageHeader(doc, meta);
-    },
+    margin: { left: 14, right: 14, top: 32 },
+    didDrawPage: () => drawPageHeader(doc, meta),
   });
 
   const total = doc.internal.getNumberOfPages();

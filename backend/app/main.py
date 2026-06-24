@@ -200,6 +200,20 @@ async def classify_panel(file: UploadFile = File(...)):
         # Classify using the service
         result = panel_classifier_service.classify_panel(image_bytes)
 
+        # Persist the reading so the dashboard can surface panel state over time.
+        # A DB failure must not break the classification response the frontend expects.
+        try:
+            from app.services.panel_cleanliness_service import save_cleanliness_reading
+
+            save_cleanliness_reading(
+                clasificacion=result["clasificacion"],
+                porcentaje_limpio=result["porcentaje_limpio"],
+                porcentaje_sucio=result["porcentaje_sucio"],
+                source="manual",
+            )
+        except Exception as e:
+            print(f"⚠️  Could not persist panel cleanliness reading: {e}")
+
         return result
 
     except RuntimeError as e:

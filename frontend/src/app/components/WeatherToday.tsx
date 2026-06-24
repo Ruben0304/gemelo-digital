@@ -25,20 +25,33 @@ export default function WeatherToday({ weather, onWeatherOverride }: WeatherToda
     night: '/lottie/Weather Night - Clear sky.lottie',
   };
 
+  // De noche el backend reporta radiación 0 (La Habana): mejor señal que la hora
+  // del navegador, que puede estar en otra zona.
+  const isNight = (solarRadiation ?? 0) <= 0;
+
   // Determinar qué animación usar según el clima actual
   const getLottieAnimation = (): LottieAnimationType => {
+    // Lluvia/tormenta manda a cualquier hora.
+    if (weatherCode !== undefined && weatherCode >= 51) return 'rainy';
+    if (weatherCode !== undefined && weatherCode >= 45) return 'cloudy'; // niebla
+
+    // Condición de nubosidad (por código WMO o, si falta, por % de nubes).
+    let cond: 'sunny' | 'partly-cloudy' | 'cloudy';
     if (weatherCode !== undefined) {
-      if (weatherCode >= 95) return 'rainy';          // tormentas
-      if (weatherCode >= 51) return 'rainy';          // lluvia/llovizna
-      if (weatherCode >= 45) return 'cloudy';         // niebla
-      if (weatherCode === 3)  return 'cloudy';
-      if (weatherCode === 2)  return 'partly-cloudy';
-      if (weatherCode <= 1)   return 'sunny';
+      if (weatherCode === 3) cond = 'cloudy';
+      else if (weatherCode === 2) cond = 'partly-cloudy';
+      else cond = 'sunny'; // 0, 1
+    } else if (cloudCover < 20) {
+      cond = 'sunny';
+    } else if (cloudCover < 50) {
+      cond = 'partly-cloudy';
+    } else {
+      cond = 'cloudy';
     }
-    if (cloudCover < 20) return 'sunny';
-    if (cloudCover < 50) return 'partly-cloudy';
-    if (cloudCover < 80) return 'cloudy';
-    return 'rainy';
+
+    // De noche: cielo despejado/parcial → animación nocturna; muy nublado → nube.
+    if (isNight) return cond === 'cloudy' ? 'cloudy' : 'night';
+    return cond;
   };
 
   const currentAnimation = getLottieAnimation();

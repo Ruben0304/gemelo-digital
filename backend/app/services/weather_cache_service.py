@@ -29,6 +29,12 @@ from typing import Any, Dict, Optional, Tuple
 import httpx
 
 OPENMETEO_BASE_URL = "https://api.open-meteo.com/v1/forecast"
+# Archivo histórico (reanálisis ERA5): cubre desde 1940 hasta ~5 días atrás, con
+# las mismas variables horarias y sin huecos. Lo usamos para el modo "Histórico"
+# (fechas que el endpoint /forecast ya no devuelve de forma fiable).
+OPENMETEO_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+# A partir de cuántos días atrás conviene pedir al archivo en lugar de /forecast.
+ARCHIVE_CUTOFF_DAYS = 5
 LOCAL_TZ = ZoneInfo("America/Havana")
 LOCAL_UTC_OFFSET_H = 5  # La Habana = UTC-5 (constante en el mock, sin DST)
 TTL_SECONDS = 300       # 5 minutos: refresco normal
@@ -58,8 +64,18 @@ _DAILY_VARS = [
 ]
 
 
-async def _fetch_hourly(lat: float, lon: float, start_date: date, end_date: date) -> Dict[str, Any]:
-    """Petición horaria (UTC) a Open-Meteo para un rango de fechas."""
+async def _fetch_hourly(
+    lat: float, lon: float, start_date: date, end_date: date, *, archive: bool = False
+) -> Dict[str, Any]:
+    """
+    Petición horaria (UTC) a Open-Meteo para un rango de fechas.
+
+    Con ``archive=True`` se consulta el Archive API (reanálisis ERA5), válido para
+    fechas históricas; con ``archive=False`` el endpoint /forecast (reciente+futuro).
+    Ambos devuelven exactamente las mismas variables, así que el predictor no nota
+    la diferencia.
+    """
+    base_url = OPENMETEO_ARCHIVE_URL if archive else OPENMETEO_BASE_URL
     params = {
         "latitude": lat,
         "longitude": lon,
@@ -68,8 +84,9 @@ async def _fetch_hourly(lat: float, lon: float, start_date: date, end_date: date
         "end_date": end_date.strftime("%Y-%m-%d"),
         "timezone": "UTC",
     }
-    async with httpx.AsyncClient(timeout=5) as client:
-        response = await client.get(OPENMETEO_BASE_URL, params=params)
+    # 25 s: los rangos largos del Archive API (medio año horario) son pesados.
+    async with httpx.AsyncClient(timeout=25) as client:
+        response = await client.get(base_url, params=params)
     response.raise_for_status()
     return response.json()
 
@@ -241,10 +258,20 @@ class WeatherCache:
             await self._ensure_window(lat, lon)
             if self._hourly_raw is not None and self._hourly_key == key:
                 return self._hourly_raw
-        # Fuera de ventana: consulta puntual; si falla, datos de prueba marcados.
+        # Fuera de ventana: consulta puntual (no cacheada). Para fechas claramente
+        # pasadas usamos el Archive API (ERA5), que sí las devuelve; para el resto,
+        # /forecast. Si el archivo aún no cubre una fecha muy reciente, reintentamos
+        # con /forecast antes de caer a datos de prueba.
+        today = datetime.now(LOCAL_TZ).date()
+        use_archive = end_date <= today - timedelta(days=ARCHIVE_CUTOFF_DAYS)
         try:
-            return await _fetch_hourly(lat, lon, start_date, end_date)
+            return await _fetch_hourly(lat, lon, start_date, end_date, archive=use_archive)
         except Exception:
+            if use_archive:
+                try:
+                    return await _fetch_hourly(lat, lon, start_date, end_date, archive=False)
+                except Exception:
+                    pass
             return _mock_hourly_raw(start_date, end_date)
 
     # ------------------------------------------------------------------ #

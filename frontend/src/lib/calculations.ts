@@ -16,8 +16,11 @@ export function calculateSystemMetrics(
   const dailyProduction = historicalData.reduce((sum, d) => sum + d.production, 0);
   const dailyConsumption = historicalData.reduce((sum, d) => sum + d.consumption, 0);
 
-  // Calculate CO2 avoided (assuming 0.5 kg CO2 per kWh from grid)
-  const co2PerKwh = 0.5; // kg CO2 per kWh
+  // CO2 evitado. Factor de emisión de la red cubana (predominantemente fuel-oil):
+  // ≈1.0 kg CO2/kWh, orden de magnitud de los factores de red publicados para Cuba.
+  // El valor real mostrado en el dashboard lo calcula el backend (analytics.py,
+  // configurable vía GRID_CO2_FACTOR); aquí se replica para los tests de referencia.
+  const co2PerKwh = 1.0; // kg CO2 por kWh (factor de red, documentado y ajustable)
   const co2Avoided = dailyProduction * co2PerKwh;
 
   return {

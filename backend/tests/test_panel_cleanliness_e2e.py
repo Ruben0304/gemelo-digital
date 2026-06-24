@@ -28,6 +28,26 @@ _LIMPIO = _FIXTURES / "limpio.jpg"
 _SUCIO = _FIXTURES / "sucio.jpeg"
 
 
+@pytest.fixture(autouse=True)
+def _cleanup_real_db_readings():
+    """
+    El endpoint /api/classify-panel persiste cada clasificación en la BD real
+    (no usa mongomock, porque este test ejerce la app real de extremo a extremo).
+    Para no ensuciar la base con las fotos de prueba, borramos al terminar las
+    lecturas insertadas durante el test, identificadas por su ventana de tiempo.
+    """
+    from datetime import datetime, timezone
+
+    started_at = datetime.now(timezone.utc)
+    yield
+    try:
+        from app.services.panel_cleanliness_service import _col
+
+        _col().delete_many({"timestamp": {"$gte": started_at}})
+    except Exception as e:
+        print(f"⚠️  No se pudieron limpiar las lecturas de prueba: {e}")
+
+
 @pytest.fixture(scope="module")
 def client() -> TestClient:
     """
