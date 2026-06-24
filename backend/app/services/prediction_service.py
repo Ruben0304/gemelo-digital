@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from .system_config import get_system_config
 from .weather_service import get_weather_with_fallback
 from .inverter_service import list_inverters
+from .ml_model_service import ml_model_service
 
 DEFAULT_PANEL_EFFICIENCY = 0.2
 
@@ -66,6 +67,20 @@ def _resolve_inverter_context() -> Dict[str, float]:
         "capacityKw": total_capacity,
         "efficiency": weighted_eff / total_capacity,
     }
+
+
+def _system_efficiency_pct(config: Dict[str, Any]) -> float:
+    """Eficiencia del sistema a partir de la ficha técnica del inversor (%).
+
+    Usa la eficiencia de catálogo del/los inversores configurados, ponderada por
+    capacidad. Si no hay inversor configurado, cae al estándar PVWatts (pérdidas
+    de sistema del 14% → 86%). NO es telemetría real: es un valor de catálogo /
+    estándar de ingeniería, no una medición en vivo.
+    """
+    inverter = _resolve_inverter_context()
+    if inverter["capacityKw"] == float("inf"):  # sin inversor configurado
+        return 86.0
+    return round(inverter["efficiency"] * 100, 2)
 
 
 def _resolve_solar_context(config: Dict[str, Any]) -> Dict[str, float]:
@@ -155,11 +170,18 @@ def _predict_consumption(hour: int) -> float:
     return base_night
 
 
-def _calculate_prediction_confidence(hours_ahead: int, cloud_cover: float) -> float:
-    confidence = 95 - (hours_ahead * 2)
-    cloud_uncertainty = cloud_cover / 5
-    confidence -= cloud_uncertainty
-    return max(50, min(95, confidence))
+def _model_confidence_pct() -> int:
+    """Confianza = R² real del modelo en el conjunto de test (varianza explicada), en %.
+
+    Es la métrica de generalización medida durante el entrenamiento, no una
+    fórmula inventada. Es constante para todas las horas: refleja la calidad del
+    modelo, no una falsa certeza que decae con el horizonte. Si el modelo no está
+    cargado, devuelve 0 (no se inventa un valor).
+    """
+    r2 = ml_model_service.get_test_r2()
+    if r2 is None:
+        return 0
+    return int(round(max(0.0, min(1.0, r2)) * 100))
 
 
 def generate_hourly_predictions(
@@ -184,6 +206,7 @@ def generate_hourly_predictions(
     context = _resolve_solar_context(config)
     fallback_forecast = weather_forecast[0] if weather_forecast else None
     hours = max(1, min(int(hours), 24 * 7))
+    model_conf = _model_confidence_pct()  # R² real del modelo, igual para todas las horas
     for hour_offset in range(hours):
         timestamp = now + timedelta(hours=hour_offset)
         hour = timestamp.hour
@@ -201,7 +224,7 @@ def generate_hourly_predictions(
             temperature = _estimate_hourly_temperature(hour, forecast["maxTemp"], forecast["minTemp"])
             production = predict_production(solar_radiation, temperature, forecast["cloudCover"], hour, context)
         consumption = _consumption_from_appliances(timestamp)
-        confidence = _calculate_prediction_confidence(hour_offset, forecast["cloudCover"])
+        confidence = model_conf
 
         predictions.append(
             {
@@ -240,6 +263,7 @@ def build_projected_solar_timeline(
     predictions: List[Dict[str, Any]],
     battery: Dict[str, Any],
     initial_battery_level: float = 75,
+    system_efficiency_pct: float = 86.0,
 ) -> List[Dict[str, Any]]:
     timeline: List[Dict[str, Any]] = []
     dyn = _resolve_battery_dynamics(battery)
@@ -283,7 +307,8 @@ def build_projected_solar_timeline(
 
         denom = battery_capacity_kwh if battery_capacity_kwh > 0 else 1.0
         battery_level = max(0.0, min(100.0, (stored_energy / denom) * 100))
-        efficiency = max(75.0, min(96.0, 82 + (prediction["confidence"] - 70) * 0.25))
+        # Eficiencia real de catálogo (inversor), no una fórmula ligada a la confianza.
+        efficiency = system_efficiency_pct
 
         timeline.append(
             {
@@ -498,7 +523,9 @@ async def get_predictions_bundle(hours: int = 24) -> Dict[str, Any]:
     predictions = generate_hourly_predictions(
         weather_data["forecast"], config, hours=hours, production_override=override
     )
-    timeline = build_projected_solar_timeline(predictions, config["battery"], 75)
+    timeline = build_projected_solar_timeline(
+        predictions, config["battery"], 75, _system_efficiency_pct(config)
+    )
     battery_projection = generate_battery_projection(
         timeline,
         predictions,
