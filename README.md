@@ -17,6 +17,35 @@ gemelo_digital/
 > (MongoDB, backend, frontend y clima mock) con un solo comando. No hace falta
 > instalar Python, Node ni MongoDB en la máquina.
 
+### Configuración (puertos y URLs)
+
+Todos los puertos y URLs son **configurables** mediante un archivo `.env`.
+Si no creas ninguno, se usan los valores por defecto (3000 / 8000 / 8001 / 27017).
+
+```bash
+# Desde la raíz del repositorio
+cp .env.example .env      # copia la plantilla
+nano .env                 # ajusta puertos, URLs y JWT_SECRET a tu servidor
+```
+
+Variables disponibles (ver comentarios en `.env.example`):
+
+| Variable | Por defecto | Qué controla |
+|----------|-------------|--------------|
+| `FRONTEND_PORT` | 3000 | Puerto del host para la web |
+| `BACKEND_PORT`  | 8000 | Puerto del host para la API |
+| `CLIMA_PORT`    | 8001 | Puerto del host para el clima mock |
+| `MONGO_PORT`    | 27017 | Puerto del host para MongoDB |
+| `NEXT_PUBLIC_GRAPHQL_URL` / `NEXT_PUBLIC_API_URL` | localhost:8000 | URL del backend que verá el **navegador** |
+| `CORS_ORIGINS`  | localhost:3000 | Orígenes permitidos (URL pública del frontend) |
+| `JWT_SECRET`    | dev | Secreto de firma JWT (cámbialo) |
+
+> ⚠️ **Importante:** las `NEXT_PUBLIC_*` se incrustan en el frontend **al construir**.
+> Si cambias `BACKEND_PORT` o accedes por red, actualiza esas URLs (y `CORS_ORIGINS`)
+> **antes** de `docker compose up --build`, usando la IP/dominio del servidor.
+
+### Arranque
+
 ```bash
 # Desde la raíz del repositorio
 docker compose up --build

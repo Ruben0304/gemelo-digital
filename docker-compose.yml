@@ -3,34 +3,40 @@ services:
     image: mongo:7
     restart: unless-stopped
     ports:
-      - "27017:27017"
+      - "${MONGO_PORT:-27017}:27017"
     volumes:
       - mongodb_data:/data/db
     environment:
-      MONGO_INITDB_DATABASE: GemeloDigitalCujai
+      MONGO_INITDB_DATABASE: ${MONGODB_DB:-GemeloDigitalCujai}
 
   backend:
     build: ./backend
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     environment:
-      MONGODB_URI: mongodb://mongodb:27017/GemeloDigitalCujai
-      MONGODB_DB: GemeloDigitalCujai
-      CORS_ORIGINS: http://localhost:3000
-      JWT_SECRET: ${JWT_SECRET}
+      # Conexión interna a Mongo: usa el nombre del servicio y el puerto INTERNO
+      # (siempre 27017 dentro de la red de Docker, no depende de MONGO_PORT).
+      MONGODB_URI: mongodb://mongodb:27017/${MONGODB_DB:-GemeloDigitalCujai}
+      MONGODB_DB: ${MONGODB_DB:-GemeloDigitalCujai}
+      # Debe coincidir con la URL pública del FRONTEND (separar varias por comas).
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
     depends_on:
       - mongodb
 
   frontend:
     build:
       context: ./frontend
+      # OJO: estas URLs se "hornean" en el frontend al construir (--build).
+      # Deben apuntar a donde el NAVEGADOR alcanzará al backend
+      # (localhost en local; IP/dominio del servidor si se accede por red).
       args:
-        NEXT_PUBLIC_GRAPHQL_URL: http://localhost:8000/graphql
-        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_GRAPHQL_URL: ${NEXT_PUBLIC_GRAPHQL_URL:-http://localhost:8000/graphql}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
       - backend
 
@@ -38,7 +44,7 @@ services:
     build: ./servidor_clima_mock
     restart: unless-stopped
     ports:
-      - "8001:8001"
+      - "${CLIMA_PORT:-8001}:8001"
 
 volumes:
   mongodb_data:
